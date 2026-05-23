@@ -133,6 +133,11 @@ function Inventory:getItemAt(sx, sy)
     return nil
 end
 
+--- 모든 아이템 리스트 반환
+function Inventory:getAllItems()
+    return self.items
+end
+
 --- 인벤토리 그리기
 function Inventory:draw(font)
     local cs = self.cellSize

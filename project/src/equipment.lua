@@ -15,8 +15,8 @@ local SLOT_SIZE = 56
 
 -- 슬롯 레이아웃 정의
 local SLOT_LAYOUT = {
-    {slot = "helmet",  label = "투구",     offsetX = 0,    offsetY = -70},
-    {slot = "amulet",  label = "목걸이",   offsetX = 80,   offsetY = -35},
+    {slot = "helmet",  label = "투구",     offsetX = -40,  offsetY = -70},
+    {slot = "amulet",  label = "목걸이",   offsetX = 40,   offsetY = -70},
     {slot = "weapon1", label = "주무기",   offsetX = -80,  offsetY = 0},
     {slot = "armor",   label = "방어구",   offsetX = 0,    offsetY = 0},
     {slot = "weapon2", label = "보조",     offsetX = 80,   offsetY = 0},
