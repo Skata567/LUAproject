@@ -262,12 +262,14 @@ end
 local function initPlayer(keepStats)
     local startRoom = rooms[1]
     if keepStats then
-        player.x = startRoom.cx
-        player.y = startRoom.cy
+        if startRoom then
+            player.x = startRoom.cx
+            player.y = startRoom.cy
+        end
     else
         player = {
-            x = startRoom.cx,
-            y = startRoom.cy,
+            x = startRoom and startRoom.cx or 1,
+            y = startRoom and startRoom.cy or 1,
             char = "@",
             hp = 30,
             maxHp = 30,
