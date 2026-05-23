@@ -12,6 +12,8 @@ local cam = Camera.new()
 
 function love.load()
     love.window.setTitle("Orthographic Camera Demo")
+    local font = love.graphics.newFont("NanumGothicCoding.ttf", 14)
+    love.graphics.setFont(font)
 end
 
 function love.update(dt)
