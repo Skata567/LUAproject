@@ -368,6 +368,7 @@ local function goToTown()
     townMenuSel = 1
     dungeonRun = dungeonRun + 1
     player.hp = player.maxHp
+    shop.needsRefresh = true
     addMessage("** 마을에 도착했습니다! (HP 회복) **")
 end
 
@@ -504,7 +505,7 @@ function love.load()
 end
 
 function love.update(dt)
-    if gameState == "inventory" or gameState == "stash" then
+    if gameState == "inventory" or gameState == "stash" or gameState == "shop" then
         if not drag.item then
             local mx, my = love.mouse.getPosition()
             hoverItem = inv:getItemAt(mx, my)
@@ -516,6 +517,9 @@ function love.update(dt)
             end
             if not hoverItem and gameState == "stash" then
                 hoverItem = stash:getItemAt(mx, my)
+            end
+            if not hoverItem and gameState == "shop" then
+                hoverItem = shop:getItemAt(mx, my)
             end
         end
     end
@@ -544,7 +548,16 @@ function love.keypressed(key)
             hoverItem = nil
             return
         elseif gameState == "shop" then
+            if drag.item then
+                if drag.fromSlot == "shop" then
+                    shop:addItem(drag.item, drag.shopPrice)
+                else
+                    inv:autoPlace(drag.item)
+                end
+                drag.item = nil
+            end
             gameState = "town"
+            hoverItem = nil
             return
         elseif gameState == "stash" then
             gameState = "town"
@@ -565,8 +578,12 @@ function love.keypressed(key)
         elseif key == "return" or key == "space" then
             local sel = TOWN_MENU[townMenuSel]
             if sel == "상점" then
-                shop:refresh()
+                if shop.needsRefresh then
+                    shop:refresh()
+                end
                 gameState = "shop"
+                drag.item = nil
+                hoverItem = nil
             elseif sel == "보관함" then
                 gameState = "stash"
                 drag.item = nil
@@ -613,60 +630,55 @@ function love.mousepressed(x, y, button)
     -- 상점 클릭
     if gameState == "shop" then
         if button == 1 then
-            -- 탭 선택
-            local tab = shop:getTabAt(x, y)
-            if tab then
-                shop.mode = tab
-                shop.selectedBuy = nil
-                shop.selectedSell = nil
+            -- 상점 그리드에서 드래그
+            local shopItem = shop:getItemAt(x, y)
+            if shopItem then
+                drag.item = shopItem
+                drag.fromInv = false
+                drag.fromSlot = "shop"
+                drag.shopPrice = shop:getPrice(shopItem)
+                shop:removeItem(shopItem)
+                hoverItem = nil
                 return
             end
-
-            if shop.mode == "buy" then
-                local idx = shop:getBuySlotAt(x, y)
-                if idx then
-                    shop.selectedBuy = idx
-                end
-            else
-                local invItems = inv:getAllItems()
-                local idx = shop:getSellSlotAt(x, y, invItems)
-                if idx then
-                    shop.selectedSell = idx
-                end
+            -- 인벤토리에서 드래그
+            local invItem = inv:getItemAt(x, y)
+            if invItem then
+                drag.item = invItem
+                drag.fromInv = true
+                drag.fromSlot = nil
+                drag.shopPrice = nil
+                inv:removeItem(invItem)
+                hoverItem = nil
+                return
             end
         elseif button == 2 then
-            -- 우클릭: 구매/판매 실행
-            if shop.mode == "buy" then
-                local idx = shop:getBuySlotAt(x, y)
-                if not idx then idx = shop.selectedBuy end
-                if idx and shop.stock[idx] then
-                    local entry = shop.stock[idx]
-                    if player.gold >= entry.price then
-                        local boughtItem = entry.item:clone()
-                        if inv:autoPlace(boughtItem) then
-                            player.gold = player.gold - entry.price
-                            table.remove(shop.stock, idx)
-                            shop.selectedBuy = nil
-                            addMessage(boughtItem.name .. " 구매! (-" .. entry.price .. "G)")
-                        else
-                            addMessage("인벤토리가 꽉 찼습니다!")
-                        end
+            -- 우클릭: 빠른 구매/판매
+            local shopItem = shop:getItemAt(x, y)
+            if shopItem then
+                local price = shop:getPrice(shopItem)
+                if player.gold >= price then
+                    shop:removeItem(shopItem)
+                    if inv:autoPlace(shopItem) then
+                        player.gold = player.gold - price
+                        addMessage(shopItem.name .. " 구매! (-" .. price .. "G)")
                     else
-                        addMessage("골드가 부족합니다!")
+                        shop:addItem(shopItem, price)
+                        addMessage("인벤토리가 꽉 찼습니다!")
                     end
+                else
+                    addMessage("골드가 부족합니다!")
                 end
-            else
-                local invItems = inv:getAllItems()
-                local idx = shop:getSellSlotAt(x, y, invItems)
-                if not idx then idx = shop.selectedSell end
-                if idx and invItems[idx] then
-                    local item = invItems[idx]
-                    local price = shop:getSellPrice(item)
-                    inv:removeItem(item)
-                    player.gold = player.gold + price
-                    shop.selectedSell = nil
-                    addMessage(item.name .. " 판매! (+" .. price .. "G)")
-                end
+                return
+            end
+            local invItem = inv:getItemAt(x, y)
+            if invItem then
+                local price = shop:getSellPrice(invItem)
+                inv:removeItem(invItem)
+                player.gold = player.gold + price
+                shop:addItem(invItem, price)
+                addMessage(invItem.name .. " 판매! (+" .. price .. "G)")
+                return
             end
         end
         return
@@ -739,8 +751,12 @@ function love.mousepressed(x, y, button)
                     townMenuSel = i
                     -- 실행
                     if label == "상점" then
-                        shop:refresh()
+                        if shop.needsRefresh then
+                            shop:refresh()
+                        end
                         gameState = "shop"
+                        drag.item = nil
+                        hoverItem = nil
                     elseif label == "보관함" then
                         gameState = "stash"
                         drag.item = nil
@@ -829,6 +845,64 @@ end
 function love.mousereleased(x, y, button)
     if button == 1 and drag.item then
         local item = drag.item
+
+        -- 상점 모드에서 드랍
+        if gameState == "shop" then
+            -- 상점→인벤: 구매
+            if drag.fromSlot == "shop" then
+                local col, row = inv:screenToGrid(x, y)
+                col = col - math.floor(item.gridW / 2)
+                row = row - math.floor(item.gridH / 2)
+                local price = drag.shopPrice or 0
+                if inv:canPlace(item, col, row) and player.gold >= price then
+                    inv:placeItem(item, col, row)
+                    player.gold = player.gold - price
+                    addMessage(item.name .. " 구매! (-" .. price .. "G)")
+                    drag.item = nil
+                    return
+                end
+                -- 상점 그리드에 드롭 시도
+                local sc, sr = shop:screenToGrid(x, y)
+                sc = sc - math.floor(item.gridW / 2)
+                sr = sr - math.floor(item.gridH / 2)
+                if shop:canPlace(item, sc, sr) then
+                    shop:placeItem(item, sc, sr, drag.shopPrice)
+                    drag.item = nil
+                    return
+                end
+                -- 실패 → 원위치
+                shop:addItem(item, drag.shopPrice)
+                if player.gold < price then
+                    addMessage("골드가 부족합니다!")
+                end
+            else
+                -- 인벤→상점: 판매
+                local sc, sr = shop:screenToGrid(x, y)
+                sc = sc - math.floor(item.gridW / 2)
+                sr = sr - math.floor(item.gridH / 2)
+                if shop:canPlace(item, sc, sr) then
+                    local price = shop:getSellPrice(item)
+                    shop:placeItem(item, sc, sr, price)
+                    player.gold = player.gold + price
+                    addMessage(item.name .. " 판매! (+" .. price .. "G)")
+                    drag.item = nil
+                    return
+                end
+                -- 인벤에 드롭 시도
+                local col, row = inv:screenToGrid(x, y)
+                col = col - math.floor(item.gridW / 2)
+                row = row - math.floor(item.gridH / 2)
+                if inv:canPlace(item, col, row) then
+                    inv:placeItem(item, col, row)
+                    drag.item = nil
+                    return
+                end
+                -- 실패 → 원위치
+                inv:autoPlace(item)
+            end
+            drag.item = nil
+            return
+        end
 
         -- 보관함 모드에서 드랍
         if gameState == "stash" then
@@ -1203,11 +1277,94 @@ local function drawStash()
     love.graphics.printf("좌클릭: 드래그 | 우클릭: 빠른 이동 | Esc: 닫기", 0, sh - 25, sw, "center")
 end
 
+local function drawShop()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    -- 상점 그리드 위치 설정
+    shop.grid.x = 30
+    shop.grid.y = 50
+
+    -- 인벤토리 위치 설정
+    inv.x = shop.grid.x + shop.grid.cols * shop.grid.cellSize + 40
+    inv.y = 50
+
+    -- 타이틀
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.printf("상 점", 0, 8, sw, "center")
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.printf("골드: " .. player.gold, 0, 8, sw - 20, "right")
+
+    -- 라벨
+    love.graphics.setColor(0.9, 0.7, 0.3)
+    love.graphics.print("상점 재고", shop.grid.x, shop.grid.y - 20)
+    love.graphics.setColor(COLOR_GOLD)
+    love.graphics.print("인벤토리", inv.x, inv.y - 20)
+
+    -- 그리드 그리기
+    shop.grid:draw(font)
+    inv:draw(font)
+
+    -- 가격 표시 (상점 아이템)
+    for _, item in ipairs(shop.grid.items) do
+        local price = shop:getPrice(item)
+        local ix = shop.grid.x + (item._gridCol - 1) * shop.grid.cellSize
+        local iy = shop.grid.y + (item._gridRow - 1) * shop.grid.cellSize
+
+        love.graphics.setColor(0, 0, 0, 0.7)
+        local priceText = price .. "G"
+        local tw = font:getWidth(priceText)
+        love.graphics.rectangle("fill", ix, iy, tw + 4, 14)
+
+        if player.gold >= price then
+            love.graphics.setColor(1, 0.85, 0)
+        else
+            love.graphics.setColor(0.7, 0.3, 0.3)
+        end
+        love.graphics.print(priceText, ix + 2, iy)
+    end
+
+    -- 인벤토리 아이템 판매가 표시
+    for _, item in ipairs(inv:getAllItems()) do
+        local price = shop:getSellPrice(item)
+        local ix = inv.x + (item._gridCol - 1) * inv.cellSize
+        local iy = inv.y + (item._gridRow - 1) * inv.cellSize
+        local iw = item.gridW * inv.cellSize
+        local priceText = price .. "G"
+        local tw = font:getWidth(priceText)
+
+        love.graphics.setColor(0, 0, 0, 0.7)
+        love.graphics.rectangle("fill", ix + iw - tw - 4, iy, tw + 4, 14)
+        love.graphics.setColor(0.5, 0.8, 0.5)
+        love.graphics.print(priceText, ix + iw - tw - 2, iy)
+    end
+
+    -- 드래그 프리뷰
+    if drag.item then
+        local mx, my = love.mouse.getPosition()
+        inv:drawPlacePreview(drag.item, mx, my)
+        shop.grid:drawPlacePreview(drag.item, mx, my)
+        inv:drawDragItem(drag.item, mx, my)
+    end
+
+    -- 툴팁
+    if hoverItem and not drag.item then
+        local mx, my = love.mouse.getPosition()
+        inv:drawTooltip(hoverItem, mx, my)
+    end
+
+    love.graphics.setColor(COLOR_GRAY)
+    love.graphics.printf("좌클릭: 드래그 (상점↔인벤) | 우클릭: 빠른 구매/판매 | Esc: 나가기", 0, sh - 25, sw, "center")
+end
+
 function love.draw()
     if gameState == "town" then
         drawTown()
     elseif gameState == "shop" then
-        shop:draw(font, player.gold, inv:getAllItems())
+        drawShop()
     elseif gameState == "stash" then
         drawStash()
     else
