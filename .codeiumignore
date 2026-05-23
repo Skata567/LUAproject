@@ -1,0 +1,7 @@
+# Windsurf 인덱싱/수정에서 제외할 생성물 및 외부 산출물
+.git/
+node_modules/
+.DS_Store
+*.log
+*.tmp
+*.out

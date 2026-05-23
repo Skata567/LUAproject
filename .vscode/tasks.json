@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Love2D: Run project",
+            "type": "shell",
+            "command": "love .",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Lua: Run current file",
+            "type": "shell",
+            "command": "lua",
+            "args": [
+                "${file}"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
