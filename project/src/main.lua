@@ -37,7 +37,7 @@ local COLOR_GRAY     = {0.5, 0.5, 0.5}
 local COLOR_GOLD     = {1, 0.85, 0}
 
 -- 게임 상태
-local gameState = "playing" -- playing, inventory, town, shop, stash, gameover, levelup, bestiary
+local gameState = "charselect" -- charselect, playing, inventory, town, shop, stash, gameover, levelup, bestiary
 local map = {}
 local rooms = {}
 local player = {}
@@ -49,6 +49,163 @@ local floor = 1
 local font = nil
 local messageScroll = 0
 local MAX_VISIBLE_MESSAGES = 8
+
+-- 캐릭터 선택 상태
+local charSelect = {
+    phase = "race",  -- "race" or "class"
+    raceSel = 1,
+    classSel = 1,
+    chosenRace = nil,
+    chosenClass = nil,
+}
+
+-- ===== 플레이어 종족 =====
+local PLAYER_RACES = {
+    {
+        id = "human", name = "인간", char = "@", color = {1, 1, 0.8},
+        desc = "균형 잡힌 종족. 모든 무기와 마법을 고르게 배울 수 있다.",
+        stats = {str=5, dex=5, int=5, con=5, lck=5},
+        resist = {},
+        weak = {},
+        profBonus = {},  -- 숙련도 보너스 없음 (균등)
+        hpBonus = 0, expBonus = 0,
+        skills = {},
+    },
+    {
+        id = "elf", name = "엘프", char = "@", color = {0.6, 0.9, 1.0},
+        desc = "마법에 뛰어난 종족. INT/DEX가 높지만 CON이 낮다.",
+        stats = {str=3, dex=7, int=8, con=3, lck=5},
+        resist = {fire=0.1, ice=0.1, lightning=0.1},
+        weak = {strike=0.2},
+        profBonus = {fire=2, ice=2, lightning=2, holy=2},
+        hpBonus = -5, expBonus = 0,
+        skills = {{id="mana_shield", name="마나 실드", desc="피격 데미지 20% 감소 (3턴)", cooldown=8, duration=3, type="buff"}},
+    },
+    {
+        id = "dwarf", name = "드워프", char = "@", color = {0.8, 0.6, 0.3},
+        desc = "강인한 대장장이 종족. STR/CON이 높고 타격/참격에 능하다.",
+        stats = {str=7, dex=4, int=3, con=8, lck=4},
+        resist = {fire=0.15, poison=0.2},
+        weak = {lightning=0.2},
+        profBonus = {strike=3, slash=2},
+        hpBonus = 10, expBonus = 0,
+        skills = {{id="stone_skin", name="바위 피부", desc="방어력 +5 (5턴)", cooldown=10, duration=5, type="buff"}},
+    },
+    {
+        id = "orc_p", name = "오크", char = "@", color = {0.5, 0.8, 0.2},
+        desc = "호전적인 전사 종족. STR이 매우 높지만 INT가 낮다.",
+        stats = {str=9, dex=4, int=2, con=6, lck=4},
+        resist = {strike=0.1},
+        weak = {holy=0.2, lightning=0.15},
+        profBonus = {strike=3, slash=2},
+        hpBonus = 5, expBonus = 0,
+        skills = {{id="war_cry", name="전쟁 함성", desc="공격력 +30% (4턴)", cooldown=10, duration=4, type="buff"}},
+    },
+    {
+        id = "halfling", name = "하플링", char = "@", color = {0.9, 0.8, 0.5},
+        desc = "작지만 민첩하고 운이 좋은 종족. DEX/LCK가 매우 높다.",
+        stats = {str=3, dex=8, int=4, con=4, lck=9},
+        resist = {poison=0.2},
+        weak = {strike=0.15},
+        profBonus = {pierce=3},
+        hpBonus = -5, expBonus = 10,
+        skills = {{id="lucky_dodge", name="행운의 회피", desc="다음 공격 100% 회피", cooldown=8, duration=1, type="buff"}},
+    },
+    {
+        id = "troll_p", name = "트롤", char = "@", color = {0.4, 0.7, 0.3},
+        desc = "강력한 재생력의 거인. STR/CON 극도로 높지만 INT/DEX가 낮다.",
+        stats = {str=10, dex=2, int=1, con=10, lck=3},
+        resist = {poison=0.3},
+        weak = {fire=0.4},
+        profBonus = {strike=4},
+        hpBonus = 20, expBonus = -10,
+        skills = {{id="regenerate", name="재생", desc="매 턴 HP 3 회복 (6턴)", cooldown=12, duration=6, type="buff"}},
+    },
+    {
+        id = "undead_p", name = "언데드", char = "@", color = {0.5, 0.7, 0.5},
+        desc = "죽음에서 돌아온 자. 독 면역, 화염/신성에 약하다.",
+        stats = {str=6, dex=4, int=6, con=6, lck=3},
+        resist = {poison=1.0, ice=0.3},
+        weak = {fire=0.4, holy=0.5},
+        profBonus = {slash=2, ice=2},
+        hpBonus = 5, expBonus = 0,
+        skills = {{id="drain_life", name="생명력 흡수", desc="적에게 데미지 + HP 흡수", cooldown=6, duration=0, type="attack", value=15}},
+    },
+}
+
+-- ===== 플레이어 직업 =====
+local PLAYER_CLASSES = {
+    {
+        id = "fighter", name = "전사", color = {1, 0.4, 0.3},
+        desc = "근접 전투의 달인. 참격/타격 무기에 능하고 방어력이 높다.",
+        statBonus = {str=3, dex=1, int=0, con=3, lck=0},
+        profBonus = {slash=3, strike=2},
+        startWeapon = "steel_sword",
+        startArmor = "chain_mail",
+        startItems = {"health_potion"},
+        skills = {{id="power_strike", name="강타", desc="다음 공격 데미지 2배", cooldown=6, duration=0, type="nextAtk", value=2.0}},
+    },
+    {
+        id = "rogue", name = "도적", color = {0.5, 1, 0.5},
+        desc = "은밀한 암살자. 찌르기 무기에 능하고 치명타가 높다.",
+        statBonus = {str=0, dex=4, int=0, con=1, lck=3},
+        profBonus = {pierce=4},
+        startWeapon = "dagger",
+        startArmor = "leather_armor",
+        startItems = {"health_potion", "health_potion"},
+        skills = {{id="backstab", name="급소 찌르기", desc="다음 공격 치명타 확정 (3배)", cooldown=8, duration=0, type="nextAtk", value=3.0}},
+    },
+    {
+        id = "mage", name = "마법사", color = {0.4, 0.6, 1},
+        desc = "원소 마법의 대가. 화염/빙결/번개 마법 무기에 능하다.",
+        statBonus = {str=0, dex=1, int=5, con=1, lck=1},
+        profBonus = {fire=3, ice=3, lightning=3},
+        startWeapon = "flame_dagger",
+        startArmor = nil,
+        startItems = {"health_potion"},
+        skills = {{id="fireball", name="화염구", desc="적에게 INT 기반 화염 데미지", cooldown=4, duration=0, type="attack", value=0, element="fire"}},
+    },
+    {
+        id = "paladin", name = "성기사", color = {1, 1, 0.5},
+        desc = "신의 전사. 신성 무기에 능하고 언데드/악마에 강하다.",
+        statBonus = {str=2, dex=0, int=2, con=3, lck=1},
+        profBonus = {holy=5, strike=2},
+        startWeapon = "holy_mace",
+        startArmor = "chain_mail",
+        startItems = {"health_potion"},
+        skills = {{id="holy_smite", name="신성한 강타", desc="적에게 신성 데미지 (언데드/악마 2배)", cooldown=5, duration=0, type="attack", value=0, element="holy"}},
+    },
+    {
+        id = "ranger", name = "궁수", color = {0.3, 0.8, 0.3},
+        desc = "민첩한 사냥꾼. 찌르기 무기에 능하고 회피가 높다.",
+        statBonus = {str=1, dex=4, int=1, con=1, lck=2},
+        profBonus = {pierce=4, slash=1},
+        startWeapon = "dagger",
+        startArmor = "leather_armor",
+        startItems = {"health_potion", "health_potion"},
+        skills = {{id="precise_shot", name="정밀 사격", desc="다음 공격 명중 100% + 방어 무시", cooldown=6, duration=0, type="nextAtk", value=1.5}},
+    },
+    {
+        id = "priest", name = "사제", color = {1, 1, 0.8},
+        desc = "신성한 치유사. 신성 마법에 능하고 HP 회복 능력이 뛰어나다.",
+        statBonus = {str=0, dex=1, int=4, con=3, lck=1},
+        profBonus = {holy=4, strike=1},
+        startWeapon = "holy_mace",
+        startArmor = nil,
+        startItems = {"health_potion", "health_potion", "health_potion"},
+        skills = {{id="heal", name="치유", desc="HP를 INT*3 만큼 회복", cooldown=5, duration=0, type="heal"}},
+    },
+    {
+        id = "berserker", name = "광전사", color = {1, 0.2, 0.1},
+        desc = "분노의 전사. 양손 무기에 능하고 광폭화 시 초강력 공격.",
+        statBonus = {str=5, dex=0, int=0, con=3, lck=0},
+        profBonus = {slash=3, strike=3},
+        startWeapon = "long_sword",
+        startArmor = nil,
+        startItems = {"health_potion"},
+        skills = {{id="berserk", name="광폭화", desc="공격력 2배, 방어 0 (5턴)", cooldown=15, duration=5, type="buff"}},
+    },
+}
 
 -- 인벤토리 & 장비
 local inv = nil
@@ -458,10 +615,42 @@ local function initPlayer(keepStats)
             player.y = startRoom.cy
         end
     else
+        local race = charSelect.chosenRace or PLAYER_RACES[1]
+        local class = charSelect.chosenClass or PLAYER_CLASSES[1]
+
+        -- 기본 스탯 = 종족 기본 + 직업 보너스
+        local baseStr = race.stats.str + class.statBonus.str
+        local baseDex = race.stats.dex + class.statBonus.dex
+        local baseInt = race.stats.int + class.statBonus.int
+        local baseCon = race.stats.con + class.statBonus.con
+        local baseLck = race.stats.lck + class.statBonus.lck
+
+        -- 무기 숙련도 초기값 (종족 + 직업)
+        local prof = {}
+        local profElements = {"slash", "pierce", "strike", "fire", "ice", "lightning", "poison", "holy"}
+        for _, e in ipairs(profElements) do
+            prof[e] = (race.profBonus[e] or 0) + (class.profBonus[e] or 0)
+        end
+
+        -- 스킬 목록 (종족 + 직업)
+        local skills = {}
+        for _, s in ipairs(race.skills) do
+            table.insert(skills, {id=s.id, name=s.name, desc=s.desc, cooldown=s.cooldown, currentCd=0, duration=s.duration, type=s.type, value=s.value, element=s.element, active=0})
+        end
+        for _, s in ipairs(class.skills) do
+            table.insert(skills, {id=s.id, name=s.name, desc=s.desc, cooldown=s.cooldown, currentCd=0, duration=s.duration, type=s.type, value=s.value, element=s.element, active=0})
+        end
+
+        -- 종족/직업 저항/약점 합산
+        local pResist = {}
+        local pWeak = {}
+        for k, v in pairs(race.resist) do pResist[k] = v end
+        for k, v in pairs(race.weak) do pWeak[k] = v end
+
         player = {
             x = startRoom and startRoom.cx or 1,
             y = startRoom and startRoom.cy or 1,
-            char = "@",
+            char = race.char or "@",
             hp = 30,
             maxHp = 30,
             baseAtk = 3,
@@ -470,12 +659,25 @@ local function initPlayer(keepStats)
             nextExp = 20,
             level = 1,
             gold = 0,
-            -- DCSS 스타일 스탯
-            str = 5,   -- 힘: 근접 데미지, 무거운 장비
-            dex = 5,   -- 민첩: 명중률, 회피, 치명타
-            int = 5,   -- 지능: 마법 데미지 (향후 확장)
-            con = 5,   -- 체력: 최대 HP, HP 재생
-            lck = 5,   -- 운: 치명타, 드롭률, 회피
+            str = baseStr,
+            dex = baseDex,
+            int = baseInt,
+            con = baseCon,
+            lck = baseLck,
+            raceName = race.name,
+            raceId = race.id,
+            className = class.name,
+            classId = class.id,
+            raceColor = race.color,
+            classColor = class.color,
+            proficiency = prof,
+            skills = skills,
+            resist = pResist,
+            weak = pWeak,
+            hpBonus = race.hpBonus or 0,
+            expBonus = race.expBonus or 0,
+            buffs = {},  -- {id, name, duration, ...}
+            nextAtkBonus = nil,  -- 다음 공격 보너스 (강타/급소 등)
         }
     end
 end
@@ -519,7 +721,8 @@ end
 local function getPlayerMaxHp()
     local eqHp = equip and equip:getTotalStats().hp or 0
     local base = 30 + (player.level - 1) * 5
-    return base + player.con * 3 + eqHp
+    local raceHp = player.hpBonus or 0
+    return base + player.con * 3 + eqHp + raceHp
 end
 
 --- 장비 패시브 효과 수집
@@ -563,6 +766,144 @@ local function getPlayerElement()
     return "physical"
 end
 
+--- 숙련도 보너스 데미지 배율
+local function getProficiencyBonus(element)
+    if not player.proficiency then return 1.0 end
+    local prof = player.proficiency[element] or 0
+    return 1.0 + prof * 0.03  -- 숙련도 1당 3% 데미지 증가
+end
+
+--- 무기 사용 시 숙련도 경험치 증가
+local function gainProficiency(element)
+    if not player.proficiency or not element or element == "physical" then return end
+    local cur = player.proficiency[element] or 0
+    if cur < 20 then  -- 최대 20
+        player.proficiency[element] = cur + 0.2
+    end
+end
+
+--- 플레이어 속성 저항/약점 적용 (적 공격 → 플레이어)
+local function getPlayerElementDefense(element)
+    if not element or element == "physical" then return 1.0 end
+    if player.resist and player.resist[element] then
+        local r = player.resist[element]
+        if r >= 1.0 then return 0 end
+        return 1.0 - r
+    end
+    if player.weak and player.weak[element] then
+        return 1.0 + player.weak[element]
+    end
+    return 1.0
+end
+
+--- 활성 버프 체크
+local function hasBuff(buffId)
+    if not player.buffs then return false end
+    for _, b in ipairs(player.buffs) do
+        if b.id == buffId and b.duration > 0 then return true end
+    end
+    return false
+end
+
+--- 버프 적용
+local function applyBuff(buffId, name, duration)
+    if not player.buffs then player.buffs = {} end
+    for _, b in ipairs(player.buffs) do
+        if b.id == buffId then
+            b.duration = duration
+            return
+        end
+    end
+    table.insert(player.buffs, {id=buffId, name=name, duration=duration})
+end
+
+--- 버프 턴 감소
+local function tickBuffs()
+    if not player.buffs then return end
+    local newBuffs = {}
+    for _, b in ipairs(player.buffs) do
+        b.duration = b.duration - 1
+        if b.duration > 0 then
+            table.insert(newBuffs, b)
+        else
+            addMessage("  [" .. b.name .. "] 효과 종료")
+        end
+    end
+    player.buffs = newBuffs
+end
+
+--- 스킬 쿨다운 감소
+local function tickSkillCooldowns()
+    if not player.skills then return end
+    for _, s in ipairs(player.skills) do
+        if s.currentCd > 0 then
+            s.currentCd = s.currentCd - 1
+        end
+    end
+end
+
+--- 스킬 사용
+local function useSkill(skillIndex, targetEnemy)
+    if not player.skills or not player.skills[skillIndex] then return false end
+    local s = player.skills[skillIndex]
+    if s.currentCd > 0 then
+        addMessage(s.name .. " 쿨다운 중! (남은 " .. s.currentCd .. "턴)")
+        return false
+    end
+
+    s.currentCd = s.cooldown
+
+    if s.type == "buff" then
+        applyBuff(s.id, s.name, s.duration)
+        addMessage("★ " .. s.name .. " 발동! (" .. s.duration .. "턴)")
+        return true
+    elseif s.type == "heal" then
+        local healAmt = player.int * 3
+        player.hp = math.min(player.hp + healAmt, getPlayerMaxHp())
+        addMessage("★ " .. s.name .. "! HP +" .. healAmt .. " 회복!")
+        return true
+    elseif s.type == "attack" then
+        if not targetEnemy then
+            addMessage("대상이 없습니다!")
+            s.currentCd = 0
+            return false
+        end
+        local dmg = math.max(1, player.int * 2 + player.level * 2)
+        local elem = s.element or "physical"
+        local elemMult = getElementMult(elem, targetEnemy.race)
+        if s.id == "holy_smite" and (targetEnemy.race == "undead" or targetEnemy.race == "demon") then
+            dmg = dmg * 2
+        end
+        dmg = math.max(1, math.floor(dmg * elemMult))
+        if elemMult == 0 then
+            addMessage(targetEnemy.name .. "은(는) 면역!")
+            return true
+        end
+        targetEnemy.hp = targetEnemy.hp - dmg
+        local elemName = Item.ELEMENT_NAMES[elem] or elem
+        addMessage("★ " .. s.name .. "! " .. targetEnemy.name .. "에게 " .. dmg .. " " .. elemName .. " 데미지!")
+        if s.id == "drain_life" then
+            local heal = math.floor(dmg * 0.5)
+            player.hp = math.min(player.hp + heal, getPlayerMaxHp())
+            addMessage("  HP +" .. heal .. " 흡수!")
+        end
+        return true
+    elseif s.type == "nextAtk" then
+        player.nextAtkBonus = {name=s.name, mult=s.value, id=s.id}
+        addMessage("★ " .. s.name .. " 준비! 다음 공격에 적용됩니다.")
+        return true
+    end
+    return false
+end
+
+--- 경험치 획득 (종족 보너스 적용)
+local function gainExp(amount)
+    local bonus = player.expBonus or 0
+    local finalExp = math.max(1, math.floor(amount * (1 + bonus / 100)))
+    player.exp = player.exp + finalExp
+    return finalExp
+end
+
 -- ===== 레벨업 =====
 local function checkLevelUp()
     while player.exp >= player.nextExp do
@@ -591,18 +932,33 @@ local function dealPlayerAttack(enemy)
     local hitRoll = math.random(1, 100)
     local evade = enemy.ev or 0
 
+    -- 정밀 사격 등 다음 공격 보너스 (명중 보정)
+    local atkBonus = player.nextAtkBonus
+    if atkBonus and atkBonus.id == "precise_shot" then
+        accuracy = 999
+    end
+
     if hitRoll > accuracy - evade then
         addMessage(enemy.name .. "이(가) 공격을 회피했다!")
         return 0
     end
 
     local atk = getPlayerAtk()
+    -- 광폭화 버프: 공격력 2배
+    if hasBuff("berserk") then atk = atk * 2 end
+    -- 전쟁 함성 버프: 공격력 +30%
+    if hasBuff("war_cry") then atk = math.floor(atk * 1.3) end
+
     local enemyDef = enemy.def or 0
 
     -- 방어관통 패시브
     local armorBreak = getPassiveValue("armor_break")
     if armorBreak > 0 then
         enemyDef = math.floor(enemyDef * (1 - armorBreak / 100))
+    end
+    -- 정밀 사격: 방어 무시
+    if atkBonus and atkBonus.id == "precise_shot" then
+        enemyDef = 0
     end
 
     local dmgReduction = math.floor(enemyDef * 0.6)
@@ -614,10 +970,25 @@ local function dealPlayerAttack(enemy)
     -- 치명타 판정 (패시브 보정)
     local critChance = getPlayerCritFull()
     local isCrit = math.random(1, 100) <= critChance
+    -- 급소 찌르기: 치명타 확정
+    if atkBonus and atkBonus.id == "backstab" then
+        isCrit = true
+    end
     if isCrit then
-        dmg = math.floor(dmg * getPlayerCritMult())
+        local critMult = getPlayerCritMult()
+        if atkBonus and atkBonus.id == "backstab" then critMult = 3.0 end
+        dmg = math.floor(dmg * critMult)
     end
     dmg = math.max(1, dmg)
+
+    -- 다음 공격 데미지 배율 (강타 등)
+    if atkBonus then
+        if atkBonus.id == "power_strike" or atkBonus.id == "precise_shot" then
+            dmg = math.floor(dmg * atkBonus.mult)
+        end
+        addMessage("  [" .. atkBonus.name .. "] 적용!")
+        player.nextAtkBonus = nil
+    end
 
     -- 속성 상성 적용
     local pElement = getPlayerElement()
@@ -627,6 +998,11 @@ local function dealPlayerAttack(enemy)
         return 0
     end
     dmg = math.max(1, math.floor(dmg * elemMult))
+
+    -- 숙련도 보너스 적용
+    local profMult = getProficiencyBonus(pElement)
+    dmg = math.max(1, math.floor(dmg * profMult))
+    gainProficiency(pElement)
 
     enemy.hp = enemy.hp - dmg
     local msg = enemy.name .. "에게 " .. dmg .. " 데미지!"
@@ -728,22 +1104,50 @@ local function enemyAttack(enemy)
     local hitRoll = math.random(1, 100)
     local enemyAcc = 60 + (enemy.atk or 0) * 2
 
+    -- 행운의 회피 버프
+    if hasBuff("lucky_dodge") then
+        addMessage("  ★ 행운의 회피! " .. enemy.name .. "의 공격을 피했다!")
+        return
+    end
+
     if hitRoll > enemyAcc - evasion then
         addMessage(enemy.name .. "의 공격을 회피했다!")
         return
     end
 
     local def = getPlayerDef()
+    -- 광폭화: 방어력 0
+    if hasBuff("berserk") then def = 0 end
+    -- 바위 피부: 방어력 +5
+    if hasBuff("stone_skin") then def = def + 5 end
+    -- 마나 실드: 데미지 20% 감소 (아래에서 적용)
+
     local dmg = math.max(1, (enemy.atk or 0) - math.floor(def * 0.6))
     local variance = math.floor(dmg * 0.15)
     dmg = dmg + math.random(-variance, variance)
     dmg = math.max(1, dmg)
 
-    player.hp = player.hp - dmg
+    -- 마나 실드 데미지 감소
+    if hasBuff("mana_shield") then
+        dmg = math.max(1, math.floor(dmg * 0.8))
+    end
+
+    -- 플레이어 속성 저항/약점 적용
     local eElem = enemy.atkElement or "physical"
+    local pDefMult = getPlayerElementDefense(eElem)
+    if pDefMult == 0 then
+        addMessage(enemy.name .. "의 " .. (Item.ELEMENT_NAMES[eElem] or eElem) .. " 공격 면역!")
+        return
+    end
+    dmg = math.max(1, math.floor(dmg * pDefMult))
+
+    player.hp = player.hp - dmg
     local elemName = Item.ELEMENT_NAMES[eElem] or eElem
     if eElem ~= "physical" then
-        addMessage(enemy.name .. "이(가) " .. dmg .. " " .. elemName .. " 데미지!")
+        local extra = ""
+        if pDefMult > 1.0 then extra = " (약점!)" end
+        if pDefMult < 1.0 then extra = " (저항)" end
+        addMessage(enemy.name .. "이(가) " .. dmg .. " " .. elemName .. " 데미지!" .. extra)
     else
         addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
     end
@@ -755,7 +1159,7 @@ local function enemyAttack(enemy)
         addMessage("  ◆ 가시 반사 " .. thorns .. " 데미지!")
         if enemy.hp <= 0 then
             enemy.alive = false
-            player.exp = player.exp + enemy.exp
+            gainExp(enemy.exp)
             addMessage(enemy.name .. " 처치! (가시 반사)")
             checkLevelUp()
         end
@@ -768,7 +1172,7 @@ local function enemyAttack(enemy)
         addMessage("  ◆ 반사 " .. refDmg .. " 데미지!")
         if enemy.hp <= 0 and enemy.alive then
             enemy.alive = false
-            player.exp = player.exp + enemy.exp
+            gainExp(enemy.exp)
             addMessage(enemy.name .. " 처치! (반사)")
             checkLevelUp()
         end
@@ -848,7 +1252,7 @@ local function processStatusEffects()
                 addMessage("  " .. enemy.name .. " 화상 " .. burnDmg .. " 데미지! (남은 " .. enemy.burn .. "턴)")
                 if enemy.hp <= 0 then
                     enemy.alive = false
-                    player.exp = player.exp + enemy.exp
+                    gainExp(enemy.exp)
                     addMessage(enemy.name .. " 처치! (화상)")
                     checkLevelUp()
                 end
@@ -860,7 +1264,7 @@ local function processStatusEffects()
                 addMessage("  " .. enemy.name .. " 독 " .. poisonDmg .. " 데미지! (남은 " .. enemy.poison .. "턴)")
                 if enemy.hp <= 0 and enemy.alive then
                     enemy.alive = false
-                    player.exp = player.exp + enemy.exp
+                    gainExp(enemy.exp)
                     addMessage(enemy.name .. " 처치! (중독)")
                     checkLevelUp()
                 end
@@ -874,6 +1278,17 @@ local function processStatusEffects()
         player.hp = math.min(player.maxHp, player.hp + regen)
         addMessage("재생 +" .. regen .. " HP")
     end
+
+    -- 트롤 재생 버프
+    if hasBuff("regenerate") and player.hp < getPlayerMaxHp() then
+        local healAmt = 3
+        player.hp = math.min(getPlayerMaxHp(), player.hp + healAmt)
+        addMessage("  ★ 재생 +" .. healAmt .. " HP")
+    end
+
+    -- 버프/스킬 쿨다운 처리
+    tickBuffs()
+    tickSkillCooldowns()
 end
 
 -- ===== 적 AI =====
@@ -947,6 +1362,43 @@ local function movePlayer(dx, dy)
 end
 
 -- ===== LÖVE2D 콜백 =====
+--- 캐릭터 생성 완료 → 마을로 이동
+local function finishCharCreation()
+    -- 인벤토리 & 장비 & 상점 & 보관함 초기화
+    inv = Inventory.new(10, 6)
+    equip = Equipment.new()
+    shop = Shop.new()
+    stash = Inventory.new(10, 6)
+
+    dungeonRun = 0
+    initPlayer()
+    player.maxHp = getPlayerMaxHp()
+    player.hp = player.maxHp
+
+    -- 직업별 시작 장비
+    local cls = charSelect.chosenClass or PLAYER_CLASSES[1]
+    if cls.startWeapon then
+        local w = Item.create(cls.startWeapon)
+        if w then inv:autoPlace(w) end
+    end
+    if cls.startArmor then
+        local a = Item.create(cls.startArmor)
+        if a then inv:autoPlace(a) end
+    end
+    if cls.startItems then
+        for _, itemId in ipairs(cls.startItems) do
+            local it = Item.create(itemId)
+            if it then inv:autoPlace(it) end
+        end
+    end
+
+    gameState = "town"
+    townMenuSel = 1
+    addMessage("마을에 오신 것을 환영합니다!")
+    addMessage(player.raceName .. " " .. player.className .. "(으)로 모험을 시작합니다!")
+    addMessage("상점에서 아이템을 사고팔 수 있습니다.")
+end
+
 function love.load()
     love.window.setTitle("Extraction Roguelike")
     love.window.setMode(MAP_WIDTH * TILE_SIZE + 270, MAP_HEIGHT * TILE_SIZE + 10, {resizable = false})
@@ -956,33 +1408,15 @@ function love.load()
 
     math.randomseed(os.time())
 
-    -- 인벤토리 & 장비 & 상점 & 보관함 초기화
-    inv = Inventory.new(10, 6)
-    equip = Equipment.new()
-    shop = Shop.new()
-    stash = Inventory.new(10, 6)
-
-    -- 마을에서 시작
-    gameState = "town"
-    townMenuSel = 1
-    dungeonRun = 0
-
-    addMessage("마을에 오신 것을 환영합니다!")
-    addMessage("상점에서 아이템을 사고팔 수 있습니다.")
-    addMessage("던전 출발을 선택하여 탐험을 시작하세요!")
-
-    initPlayer()
-    player.maxHp = getPlayerMaxHp()
-    player.hp = player.maxHp
-
-    -- 시작 아이템
-    local starter = Item.create("short_sword")
-    if starter then inv:autoPlace(starter) end
-    local pot = Item.create("health_potion")
-    if pot then pot.count = 3; inv:autoPlace(pot) end
+    -- 캐릭터 선택 화면으로 시작
+    gameState = "charselect"
+    charSelect.phase = "race"
+    charSelect.raceSel = 1
+    charSelect.classSel = 1
 end
 
 function love.update(dt)
+    if gameState == "charselect" then return end
     if gameState == "inventory" or gameState == "stash" or gameState == "shop" then
         if not drag.item then
             local mx, my = love.mouse.getPosition()
@@ -1004,6 +1438,67 @@ function love.update(dt)
 end
 
 function love.keypressed(key)
+    -- 캐릭터 선택 화면
+    if gameState == "charselect" then
+        if charSelect.phase == "race" then
+            if key == "up" or key == "w" then
+                charSelect.raceSel = math.max(1, charSelect.raceSel - 1)
+            elseif key == "down" or key == "s" then
+                charSelect.raceSel = math.min(#PLAYER_RACES, charSelect.raceSel + 1)
+            elseif key == "return" or key == "space" then
+                charSelect.chosenRace = PLAYER_RACES[charSelect.raceSel]
+                charSelect.phase = "class"
+            end
+        elseif charSelect.phase == "class" then
+            if key == "up" or key == "w" then
+                charSelect.classSel = math.max(1, charSelect.classSel - 1)
+            elseif key == "down" or key == "s" then
+                charSelect.classSel = math.min(#PLAYER_CLASSES, charSelect.classSel + 1)
+            elseif key == "return" or key == "space" then
+                charSelect.chosenClass = PLAYER_CLASSES[charSelect.classSel]
+                finishCharCreation()
+            elseif key == "escape" then
+                charSelect.phase = "race"
+            end
+        end
+        return
+    end
+
+    -- 스킬 핫키 (1~4) — 게임 플레이 중
+    if gameState == "playing" and player.skills then
+        local skillKey = tonumber(key)
+        if skillKey and skillKey >= 1 and skillKey <= #player.skills then
+            -- 공격 스킬은 인접 적 자동 타겟
+            local target = nil
+            for _, e in ipairs(enemies) do
+                if e.alive and distance(player.x, player.y, e.x, e.y) <= 1 then
+                    target = e
+                    break
+                end
+            end
+            local used = useSkill(skillKey, target)
+            if used then
+                -- 공격 스킬 사용 후 턴 소비
+                local s = player.skills[skillKey]
+                if s.type == "attack" or s.type == "heal" then
+                    turn = turn + 1
+                    processStatusEffects()
+                    moveEnemies()
+                end
+                -- 적 처치 체크
+                if target and target.hp <= 0 and target.alive then
+                    target.alive = false
+                    gainExp(target.exp or 0)
+                    local goldDrop = math.random(5, 15) * floor
+                    player.gold = player.gold + goldDrop
+                    addMessage(target.name .. " 처치! (+" .. target.exp .. " 경험치, +" .. goldDrop .. " 골드)")
+                    checkLevelUp()
+                end
+            end
+            return
+        end
+    end
+
     -- 인벤토리 토글
     if key == "i" or key == "tab" then
         if gameState == "playing" then
@@ -1153,6 +1648,7 @@ function love.keypressed(key)
 end
 
 function love.mousepressed(x, y, button)
+    if gameState == "charselect" then return end
     -- 상점 클릭
     if gameState == "shop" then
         if button == 1 then
@@ -1372,6 +1868,7 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousereleased(x, y, button)
+    if gameState == "charselect" then return end
     if button == 1 and drag.item then
         local item = drag.item
 
@@ -1573,7 +2070,9 @@ local function drawGame()
 
     -- 플레이어 정보
     love.graphics.setColor(COLOR_GOLD)
-    love.graphics.print("=== 플레이어 ===", hudX, hudY)
+    local rn = player.raceName or "인간"
+    local cn = player.className or "전사"
+    love.graphics.print("=== " .. rn .. " " .. cn .. " ===", hudX, hudY)
     hudY = hudY + 22
 
     love.graphics.setColor(COLOR_WHITE)
@@ -1660,6 +2159,37 @@ local function drawGame()
     love.graphics.print("골드: " .. player.gold, hudX, hudY)
     hudY = hudY + 18
 
+    -- 스킬 표시
+    if player.skills and #player.skills > 0 then
+        love.graphics.setColor(0.8, 0.6, 1)
+        love.graphics.print("--- 스킬 ---", hudX, hudY)
+        hudY = hudY + 15
+        for i, s in ipairs(player.skills) do
+            if s.currentCd > 0 then
+                love.graphics.setColor(0.4, 0.4, 0.4)
+                love.graphics.print("[" .. i .. "] " .. s.name .. " (쿨:" .. s.currentCd .. ")", hudX, hudY)
+            else
+                love.graphics.setColor(0.9, 0.8, 1)
+                love.graphics.print("[" .. i .. "] " .. s.name, hudX, hudY)
+            end
+            hudY = hudY + 13
+        end
+        hudY = hudY + 4
+    end
+
+    -- 활성 버프 표시
+    if player.buffs and #player.buffs > 0 then
+        love.graphics.setColor(0.3, 1, 0.6)
+        love.graphics.print("--- 버프 ---", hudX, hudY)
+        hudY = hudY + 15
+        for _, b in ipairs(player.buffs) do
+            love.graphics.setColor(0.5, 1, 0.7)
+            love.graphics.print("◆ " .. b.name .. " (" .. b.duration .. "턴)", hudX, hudY)
+            hudY = hudY + 13
+        end
+        hudY = hudY + 4
+    end
+
     -- 조작법
     love.graphics.setColor(COLOR_GRAY)
     love.graphics.print("--- 조작법 ---", hudX, hudY)
@@ -1668,7 +2198,7 @@ local function drawGame()
     hudY = hudY + 14
     love.graphics.print("부딪히기: 공격 | Space: 대기", hudX, hudY)
     hudY = hudY + 14
-    love.graphics.print("I/Tab: 인벤토리", hudX, hudY)
+    love.graphics.print("I/Tab: 인벤 | 1~4: 스킬", hudX, hudY)
     hudY = hudY + 14
     love.graphics.print(">: 계단 | PgUp/Dn: 로그", hudX, hudY)
     hudY = hudY + 18
@@ -1820,8 +2350,10 @@ local function drawTown()
     love.graphics.printf("마 을", 0, 40, sw, "center")
 
     -- 플레이어 정보
-    love.graphics.setColor(COLOR_WHITE)
-    love.graphics.printf("Lv." .. player.level .. "  골드: " .. player.gold .. "  탐험: " .. dungeonRun .. "회", 0, 70, sw, "center")
+    local rn = player.raceName or "인간"
+    local cn = player.className or "전사"
+    love.graphics.setColor(player.raceColor or {1,1,1})
+    love.graphics.printf(rn .. " " .. cn .. "  Lv." .. player.level .. "  골드: " .. player.gold .. "  탐험: " .. dungeonRun .. "회", 0, 70, sw, "center")
 
     -- 메뉴
     local menuW = 200
@@ -2034,6 +2566,269 @@ local ELEMENT_LIST = {"slash", "pierce", "strike", "fire", "ice", "lightning", "
 local ELEMENT_NAMES = Item.ELEMENT_NAMES
 local ELEMENT_COLORS = Item.ELEMENT_COLORS
 
+-- ===== 캐릭터 선택 화면 =====
+local function drawCharSelect()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+
+    love.graphics.setColor(0.05, 0.05, 0.12)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    if charSelect.phase == "race" then
+        -- 종족 선택
+        love.graphics.setColor(1, 0.85, 0)
+        love.graphics.printf("= 종족 선택 =", 0, 15, sw, "center")
+
+        local listX = 30
+        local infoX = sw * 0.45
+        local startY = 50
+
+        for i, race in ipairs(PLAYER_RACES) do
+            local y = startY + (i - 1) * 28
+            if i == charSelect.raceSel then
+                love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
+                love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, 26, 4, 4)
+                love.graphics.setColor(race.color[1], race.color[2], race.color[3])
+                love.graphics.print("▶ " .. race.name, listX, y)
+            else
+                love.graphics.setColor(0.6, 0.6, 0.6)
+                love.graphics.print("  " .. race.name, listX, y)
+            end
+        end
+
+        -- 선택된 종족 상세 정보
+        local sel = PLAYER_RACES[charSelect.raceSel]
+        if sel then
+            local iy = startY
+            love.graphics.setColor(sel.color[1], sel.color[2], sel.color[3])
+            love.graphics.print("【" .. sel.name .. "】", infoX, iy)
+            iy = iy + 22
+
+            love.graphics.setColor(0.8, 0.8, 0.8)
+            love.graphics.printf(sel.desc, infoX, iy, sw - infoX - 20, "left")
+            iy = iy + 40
+
+            -- 기본 스탯
+            love.graphics.setColor(COLOR_GOLD)
+            love.graphics.print("기본 스탯:", infoX, iy)
+            iy = iy + 18
+            love.graphics.setColor(1, 0.5, 0.3)
+            love.graphics.print("STR " .. sel.stats.str, infoX, iy)
+            love.graphics.setColor(0.3, 1, 0.5)
+            love.graphics.print("DEX " .. sel.stats.dex, infoX + 55, iy)
+            love.graphics.setColor(0.4, 0.7, 1)
+            love.graphics.print("INT " .. sel.stats.int, infoX + 110, iy)
+            iy = iy + 16
+            love.graphics.setColor(0.9, 0.6, 0.2)
+            love.graphics.print("CON " .. sel.stats.con, infoX, iy)
+            love.graphics.setColor(1, 1, 0.4)
+            love.graphics.print("LCK " .. sel.stats.lck, infoX + 55, iy)
+            iy = iy + 22
+
+            -- HP/경험치 보너스
+            if sel.hpBonus ~= 0 then
+                local sign = sel.hpBonus > 0 and "+" or ""
+                love.graphics.setColor(0.8, 0.3, 0.3)
+                love.graphics.print("HP 보너스: " .. sign .. sel.hpBonus, infoX, iy)
+                iy = iy + 16
+            end
+            if sel.expBonus ~= 0 then
+                local sign = sel.expBonus > 0 and "+" or ""
+                love.graphics.setColor(0.3, 0.8, 0.3)
+                love.graphics.print("경험치 보너스: " .. sign .. sel.expBonus .. "%", infoX, iy)
+                iy = iy + 16
+            end
+
+            -- 저항
+            iy = iy + 4
+            love.graphics.setColor(0.3, 0.7, 1)
+            love.graphics.print("저항:", infoX, iy)
+            local rx = infoX + 40
+            if next(sel.resist) then
+                for elem, val in pairs(sel.resist) do
+                    local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                    love.graphics.setColor(ec[1], ec[2], ec[3])
+                    local label
+                    if val >= 1.0 then label = (ELEMENT_NAMES[elem] or elem) .. "(면역)"
+                    else label = (ELEMENT_NAMES[elem] or elem) .. "(-" .. math.floor(val*100) .. "%)" end
+                    love.graphics.print(label, rx, iy)
+                    rx = rx + font:getWidth(label) + 10
+                end
+            else
+                love.graphics.setColor(COLOR_GRAY)
+                love.graphics.print("없음", rx, iy)
+            end
+            iy = iy + 18
+
+            -- 약점
+            love.graphics.setColor(1, 0.4, 0.3)
+            love.graphics.print("약점:", infoX, iy)
+            local wx = infoX + 40
+            if next(sel.weak) then
+                for elem, val in pairs(sel.weak) do
+                    local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                    love.graphics.setColor(ec[1], ec[2], ec[3])
+                    local label = (ELEMENT_NAMES[elem] or elem) .. "(+" .. math.floor(val*100) .. "%)"
+                    love.graphics.print(label, wx, iy)
+                    wx = wx + font:getWidth(label) + 10
+                end
+            else
+                love.graphics.setColor(COLOR_GRAY)
+                love.graphics.print("없음", wx, iy)
+            end
+            iy = iy + 22
+
+            -- 숙련 보너스
+            love.graphics.setColor(0.8, 0.6, 1)
+            love.graphics.print("무기 숙련:", infoX, iy)
+            local px = infoX + 60
+            local hasProf = false
+            for elem, val in pairs(sel.profBonus) do
+                if val > 0 then
+                    local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                    love.graphics.setColor(ec[1], ec[2], ec[3])
+                    local label = (ELEMENT_NAMES[elem] or elem) .. "+" .. val
+                    love.graphics.print(label, px, iy)
+                    px = px + font:getWidth(label) + 10
+                    hasProf = true
+                end
+            end
+            if not hasProf then
+                love.graphics.setColor(COLOR_GRAY)
+                love.graphics.print("균등", px, iy)
+            end
+            iy = iy + 22
+
+            -- 종족 스킬
+            if #sel.skills > 0 then
+                love.graphics.setColor(1, 0.8, 0.2)
+                love.graphics.print("종족 스킬:", infoX, iy)
+                iy = iy + 18
+                for _, sk in ipairs(sel.skills) do
+                    love.graphics.setColor(0.9, 0.7, 1)
+                    love.graphics.print("◆ " .. sk.name, infoX + 8, iy)
+                    iy = iy + 15
+                    love.graphics.setColor(0.7, 0.7, 0.7)
+                    love.graphics.printf("  " .. sk.desc .. " (쿨: " .. sk.cooldown .. "턴)", infoX + 8, iy, sw - infoX - 30, "left")
+                    iy = iy + 18
+                end
+            end
+        end
+
+        love.graphics.setColor(COLOR_GRAY)
+        love.graphics.printf("↑↓: 선택 | Enter: 확정", 0, sh - 25, sw, "center")
+
+    elseif charSelect.phase == "class" then
+        -- 직업 선택
+        love.graphics.setColor(1, 0.85, 0)
+        love.graphics.printf("= 직업 선택 = [" .. charSelect.chosenRace.name .. "]", 0, 15, sw, "center")
+
+        local listX = 30
+        local infoX = sw * 0.45
+        local startY = 50
+
+        for i, cls in ipairs(PLAYER_CLASSES) do
+            local y = startY + (i - 1) * 28
+            if i == charSelect.classSel then
+                love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
+                love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, 26, 4, 4)
+                love.graphics.setColor(cls.color[1], cls.color[2], cls.color[3])
+                love.graphics.print("▶ " .. cls.name, listX, y)
+            else
+                love.graphics.setColor(0.6, 0.6, 0.6)
+                love.graphics.print("  " .. cls.name, listX, y)
+            end
+        end
+
+        local sel = PLAYER_CLASSES[charSelect.classSel]
+        if sel then
+            local iy = startY
+            love.graphics.setColor(sel.color[1], sel.color[2], sel.color[3])
+            love.graphics.print("【" .. sel.name .. "】", infoX, iy)
+            iy = iy + 22
+
+            love.graphics.setColor(0.8, 0.8, 0.8)
+            love.graphics.printf(sel.desc, infoX, iy, sw - infoX - 20, "left")
+            iy = iy + 40
+
+            -- 스탯 보너스
+            local race = charSelect.chosenRace
+            love.graphics.setColor(COLOR_GOLD)
+            love.graphics.print("최종 스탯 (종족+직업):", infoX, iy)
+            iy = iy + 18
+            local finalStr = race.stats.str + sel.statBonus.str
+            local finalDex = race.stats.dex + sel.statBonus.dex
+            local finalInt = race.stats.int + sel.statBonus.int
+            local finalCon = race.stats.con + sel.statBonus.con
+            local finalLck = race.stats.lck + sel.statBonus.lck
+            love.graphics.setColor(1, 0.5, 0.3)
+            love.graphics.print("STR " .. finalStr .. " (+" .. sel.statBonus.str .. ")", infoX, iy)
+            love.graphics.setColor(0.3, 1, 0.5)
+            love.graphics.print("DEX " .. finalDex .. " (+" .. sel.statBonus.dex .. ")", infoX + 100, iy)
+            iy = iy + 16
+            love.graphics.setColor(0.4, 0.7, 1)
+            love.graphics.print("INT " .. finalInt .. " (+" .. sel.statBonus.int .. ")", infoX, iy)
+            love.graphics.setColor(0.9, 0.6, 0.2)
+            love.graphics.print("CON " .. finalCon .. " (+" .. sel.statBonus.con .. ")", infoX + 100, iy)
+            iy = iy + 16
+            love.graphics.setColor(1, 1, 0.4)
+            love.graphics.print("LCK " .. finalLck .. " (+" .. sel.statBonus.lck .. ")", infoX, iy)
+            iy = iy + 22
+
+            -- 무기 숙련
+            love.graphics.setColor(0.8, 0.6, 1)
+            love.graphics.print("무기 숙련:", infoX, iy)
+            local px = infoX + 60
+            for elem, val in pairs(sel.profBonus) do
+                if val > 0 then
+                    local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                    love.graphics.setColor(ec[1], ec[2], ec[3])
+                    local label = (ELEMENT_NAMES[elem] or elem) .. "+" .. val
+                    love.graphics.print(label, px, iy)
+                    px = px + font:getWidth(label) + 10
+                end
+            end
+            iy = iy + 22
+
+            -- 시작 장비
+            love.graphics.setColor(0.7, 0.9, 0.7)
+            love.graphics.print("시작 장비:", infoX, iy)
+            iy = iy + 16
+            if sel.startWeapon then
+                local wData = Item.DB[sel.startWeapon]
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.print("  무기: " .. (wData and wData.name or sel.startWeapon), infoX, iy)
+                iy = iy + 15
+            end
+            if sel.startArmor then
+                local aData = Item.DB[sel.startArmor]
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.print("  방어구: " .. (aData and aData.name or sel.startArmor), infoX, iy)
+                iy = iy + 15
+            end
+            iy = iy + 8
+
+            -- 직업 스킬
+            if #sel.skills > 0 then
+                love.graphics.setColor(1, 0.8, 0.2)
+                love.graphics.print("직업 스킬:", infoX, iy)
+                iy = iy + 18
+                for _, sk in ipairs(sel.skills) do
+                    love.graphics.setColor(0.9, 0.7, 1)
+                    love.graphics.print("◆ " .. sk.name, infoX + 8, iy)
+                    iy = iy + 15
+                    love.graphics.setColor(0.7, 0.7, 0.7)
+                    love.graphics.printf("  " .. sk.desc .. " (쿨: " .. sk.cooldown .. "턴)", infoX + 8, iy, sw - infoX - 30, "left")
+                    iy = iy + 18
+                end
+            end
+        end
+
+        love.graphics.setColor(COLOR_GRAY)
+        love.graphics.printf("↑↓: 선택 | Enter: 확정 | Esc: 종족 재선택", 0, sh - 25, sw, "center")
+    end
+end
+
 local function drawBestiary()
     local sw = love.graphics.getWidth()
     local sh = love.graphics.getHeight()
@@ -2137,7 +2932,9 @@ local function drawBestiary()
 end
 
 function love.draw()
-    if gameState == "town" then
+    if gameState == "charselect" then
+        drawCharSelect()
+    elseif gameState == "town" then
         drawTown()
     elseif gameState == "bestiary" then
         drawBestiary()
