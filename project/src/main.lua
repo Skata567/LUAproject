@@ -59,16 +59,15 @@ local charSelect = {
     chosenClass = nil,
 }
 
--- ===== 플레이어 종족 =====
+-- ===== 플레이어 종족 (20종) =====
 local PLAYER_RACES = {
     {
         id = "human", name = "인간", char = "@", color = {1, 1, 0.8},
         desc = "균형 잡힌 종족. 모든 무기와 마법을 고르게 배울 수 있다.",
         stats = {str=5, dex=5, int=5, con=5, lck=5},
-        resist = {},
-        weak = {},
-        profBonus = {},  -- 숙련도 보너스 없음 (균등)
-        hpBonus = 0, expBonus = 0,
+        resist = {}, weak = {},
+        profBonus = {},
+        hpBonus = 0, expBonus = 5,
         skills = {},
     },
     {
@@ -131,79 +130,393 @@ local PLAYER_RACES = {
         hpBonus = 5, expBonus = 0,
         skills = {{id="drain_life", name="생명력 흡수", desc="적에게 데미지 + HP 흡수", cooldown=6, duration=0, type="attack", value=15}},
     },
+    -- === 신규 종족 8~20 ===
+    {
+        id = "dark_elf", name = "다크 엘프", char = "@", color = {0.5, 0.3, 0.7},
+        desc = "어둠에 적응한 엘프. 독/번개 마법에 뛰어나고 화염에 약하다.",
+        stats = {str=4, dex=8, int=7, con=3, lck=4},
+        resist = {poison=0.3, lightning=0.2},
+        weak = {fire=0.25, holy=0.2},
+        profBonus = {poison=3, lightning=3, pierce=2},
+        hpBonus = -3, expBonus = 0,
+        skills = {{id="shadow_cloak", name="그림자 은폐", desc="회피율 대폭 상승 (3턴)", cooldown=9, duration=3, type="buff"}},
+    },
+    {
+        id = "gnome", name = "노움", char = "@", color = {0.7, 0.5, 0.3},
+        desc = "발명에 능한 소형 종족. INT/LCK가 높고 STR이 낮다.",
+        stats = {str=2, dex=6, int=7, con=4, lck=8},
+        resist = {lightning=0.3},
+        weak = {strike=0.2},
+        profBonus = {lightning=3, fire=2},
+        hpBonus = -8, expBonus = 15,
+        skills = {{id="tinker_bomb", name="폭발 장치", desc="적에게 화염 폭발 데미지", cooldown=5, duration=0, type="attack", value=18, element="fire"}},
+    },
+    {
+        id = "lizardfolk", name = "도마뱀인", char = "@", color = {0.3, 0.7, 0.4},
+        desc = "냉혈 전사. 독/빙결에 강하고 빠른 재생력을 가진다.",
+        stats = {str=6, dex=6, int=3, con=7, lck=3},
+        resist = {poison=0.25, ice=0.15},
+        weak = {fire=0.2},
+        profBonus = {slash=2, pierce=2, poison=2},
+        hpBonus = 5, expBonus = 0,
+        skills = {{id="venom_spit", name="독침 뱉기", desc="적에게 독 데미지", cooldown=5, duration=0, type="attack", value=12, element="poison"}},
+    },
+    {
+        id = "fairy", name = "요정", char = "@", color = {1, 0.7, 1},
+        desc = "작지만 강력한 마법 종족. INT 극강이지만 체력이 매우 낮다.",
+        stats = {str=1, dex=7, int=11, con=1, lck=7},
+        resist = {fire=0.2, ice=0.2, lightning=0.2, holy=0.3},
+        weak = {slash=0.3, strike=0.3, pierce=0.3},
+        profBonus = {fire=3, ice=3, lightning=3, holy=3},
+        hpBonus = -15, expBonus = 0,
+        skills = {{id="pixie_dust", name="요정 가루", desc="HP를 INT*2 만큼 회복", cooldown=6, duration=0, type="heal"}},
+    },
+    {
+        id = "demon_p", name = "악마", char = "@", color = {0.9, 0.2, 0.2},
+        desc = "지옥에서 온 존재. 화염/독에 강하지만 신성에 매우 약하다.",
+        stats = {str=7, dex=5, int=7, con=5, lck=2},
+        resist = {fire=0.5, poison=0.4},
+        weak = {holy=0.6},
+        profBonus = {fire=4, poison=3},
+        hpBonus = 0, expBonus = -5,
+        skills = {{id="hellfire", name="지옥불", desc="적에게 강력한 화염 데미지", cooldown=7, duration=0, type="attack", value=22, element="fire"}},
+    },
+    {
+        id = "angel_p", name = "천사", char = "@", color = {1, 1, 0.7},
+        desc = "천상의 존재. 신성/빙결에 강하고 독/화염에 약하다.",
+        stats = {str=4, dex=5, int=8, con=4, lck=6},
+        resist = {holy=0.5, ice=0.2},
+        weak = {poison=0.3, fire=0.2},
+        profBonus = {holy=5, ice=2},
+        hpBonus = -3, expBonus = 0,
+        skills = {{id="divine_light", name="신성한 빛", desc="적에게 신성 데미지 + 자신 HP 회복", cooldown=7, duration=0, type="attack", value=16, element="holy"}},
+    },
+    {
+        id = "golem_p", name = "골렘", char = "@", color = {0.6, 0.6, 0.6},
+        desc = "살아있는 돌. 물리 공격에 강하지만 마법에 약하고 느리다.",
+        stats = {str=8, dex=1, int=1, con=12, lck=1},
+        resist = {slash=0.3, pierce=0.3, strike=0.3, poison=1.0},
+        weak = {fire=0.2, ice=0.2, lightning=0.3},
+        profBonus = {strike=4},
+        hpBonus = 30, expBonus = -15,
+        skills = {{id="iron_body", name="강철 육체", desc="방어력 +10, 이동불가 (3턴)", cooldown=12, duration=3, type="buff"}},
+    },
+    {
+        id = "vampire_p", name = "뱀파이어", char = "@", color = {0.6, 0.1, 0.2},
+        desc = "밤의 귀족. 생명력 흡수에 뛰어나지만 신성/화염에 약하다.",
+        stats = {str=6, dex=7, int=6, con=5, lck=4},
+        resist = {poison=0.4, ice=0.2},
+        weak = {holy=0.4, fire=0.3},
+        profBonus = {pierce=3, slash=2},
+        hpBonus = 0, expBonus = 0,
+        skills = {{id="blood_drain", name="피의 흡수", desc="적에게 데미지 + HP 대량 흡수", cooldown=6, duration=0, type="attack", value=18}},
+    },
+    {
+        id = "werewolf_p", name = "늑대인간", char = "@", color = {0.5, 0.4, 0.3},
+        desc = "야수의 힘. STR/DEX가 높고 변신 시 초강력 공격.",
+        stats = {str=8, dex=7, int=2, con=6, lck=3},
+        resist = {strike=0.15},
+        weak = {holy=0.3},
+        profBonus = {slash=3, strike=2},
+        hpBonus = 8, expBonus = -5,
+        skills = {{id="wolf_frenzy", name="늑대 광기", desc="공격력 2.5배 + 회피 상승 (3턴)", cooldown=12, duration=3, type="buff"}},
+    },
+    {
+        id = "merfolk", name = "인어", char = "@", color = {0.3, 0.7, 0.9},
+        desc = "바다의 종족. 빙결/번개에 강하고 찌르기 무기에 뛰어나다.",
+        stats = {str=4, dex=7, int=6, con=5, lck=5},
+        resist = {ice=0.3, lightning=0.2},
+        weak = {fire=0.25},
+        profBonus = {pierce=3, ice=3},
+        hpBonus = 0, expBonus = 0,
+        skills = {{id="tidal_wave", name="파도", desc="적에게 빙결 데미지", cooldown=5, duration=0, type="attack", value=14, element="ice"}},
+    },
+    {
+        id = "dragonborn", name = "용인", char = "@", color = {0.9, 0.5, 0.1},
+        desc = "용의 피를 이어받은 종족. 화염에 면역이고 강력한 브레스.",
+        stats = {str=8, dex=3, int=5, con=7, lck=3},
+        resist = {fire=0.6},
+        weak = {ice=0.3},
+        profBonus = {fire=4, slash=2},
+        hpBonus = 10, expBonus = -5,
+        skills = {{id="dragon_breath", name="용의 브레스", desc="적에게 강력한 화염 브레스", cooldown=8, duration=0, type="attack", value=25, element="fire"}},
+    },
+    {
+        id = "spirit", name = "정령", char = "@", color = {0.7, 0.9, 1},
+        desc = "원소의 화신. 모든 원소 마법에 뛰어나지만 물리에 약하다.",
+        stats = {str=2, dex=5, int=10, con=3, lck=5},
+        resist = {fire=0.2, ice=0.2, lightning=0.2, poison=0.2},
+        weak = {slash=0.3, strike=0.3, pierce=0.3},
+        profBonus = {fire=2, ice=2, lightning=2, poison=2, holy=2},
+        hpBonus = -10, expBonus = 0,
+        skills = {{id="elemental_burst", name="원소 폭발", desc="무작위 원소로 강력한 데미지", cooldown=6, duration=0, type="attack", value=20, element="fire"}},
+    },
+    {
+        id = "beastman", name = "수인", char = "@", color = {0.7, 0.5, 0.2},
+        desc = "야생의 전사. STR/DEX 균형, 독에 강하고 빠른 회복.",
+        stats = {str=7, dex=6, int=2, con=6, lck=4},
+        resist = {poison=0.2},
+        weak = {fire=0.15},
+        profBonus = {slash=2, strike=2, pierce=2},
+        hpBonus = 5, expBonus = 0,
+        skills = {{id="primal_roar", name="원시의 포효", desc="공격력/방어력 +20% (4턴)", cooldown=10, duration=4, type="buff"}},
+    },
+    {
+        id = "shadow", name = "그림자", char = "@", color = {0.3, 0.3, 0.4},
+        desc = "어둠의 존재. 물리 회피가 높고 독/암흑에 강하다.",
+        stats = {str=4, dex=9, int=5, con=3, lck=6},
+        resist = {poison=0.3, ice=0.2},
+        weak = {holy=0.4, fire=0.2},
+        profBonus = {pierce=3, poison=3},
+        hpBonus = -8, expBonus = 5,
+        skills = {{id="shadow_step", name="그림자 걸음", desc="회피율 극대화 (2턴)", cooldown=7, duration=2, type="buff"}},
+    },
 }
 
--- ===== 플레이어 직업 =====
+-- ===== 플레이어 직업 (20종) =====
 local PLAYER_CLASSES = {
     {
         id = "fighter", name = "전사", color = {1, 0.4, 0.3},
         desc = "근접 전투의 달인. 참격/타격 무기에 능하고 방어력이 높다.",
         statBonus = {str=3, dex=1, int=0, con=3, lck=0},
         profBonus = {slash=3, strike=2},
-        startWeapon = "steel_sword",
-        startArmor = "chain_mail",
+        startWeapon = "steel_sword", startArmor = "chain_mail",
         startItems = {"health_potion"},
-        skills = {{id="power_strike", name="강타", desc="다음 공격 데미지 2배", cooldown=6, duration=0, type="nextAtk", value=2.0}},
+        skills = {
+            {id="power_strike", name="강타", desc="다음 공격 데미지 2배", cooldown=6, duration=0, type="nextAtk", value=2.0},
+            {id="shield_bash", name="방패 강타", desc="적 기절 + 타격 데미지", cooldown=8, duration=0, type="attack", value=10, element="strike"},
+        },
     },
     {
         id = "rogue", name = "도적", color = {0.5, 1, 0.5},
         desc = "은밀한 암살자. 찌르기 무기에 능하고 치명타가 높다.",
         statBonus = {str=0, dex=4, int=0, con=1, lck=3},
         profBonus = {pierce=4},
-        startWeapon = "dagger",
-        startArmor = "leather_armor",
+        startWeapon = "dagger", startArmor = "leather_armor",
         startItems = {"health_potion", "health_potion"},
-        skills = {{id="backstab", name="급소 찌르기", desc="다음 공격 치명타 확정 (3배)", cooldown=8, duration=0, type="nextAtk", value=3.0}},
+        skills = {
+            {id="backstab", name="급소 찌르기", desc="다음 공격 치명타 확정 (3배)", cooldown=8, duration=0, type="nextAtk", value=3.0},
+            {id="smoke_bomb", name="연막탄", desc="회피율 극대화 (2턴)", cooldown=10, duration=2, type="buff"},
+        },
     },
     {
         id = "mage", name = "마법사", color = {0.4, 0.6, 1},
         desc = "원소 마법의 대가. 화염/빙결/번개 마법 무기에 능하다.",
         statBonus = {str=0, dex=1, int=5, con=1, lck=1},
         profBonus = {fire=3, ice=3, lightning=3},
-        startWeapon = "flame_dagger",
-        startArmor = nil,
+        startWeapon = "flame_dagger", startArmor = nil,
         startItems = {"health_potion"},
-        skills = {{id="fireball", name="화염구", desc="적에게 INT 기반 화염 데미지", cooldown=4, duration=0, type="attack", value=0, element="fire"}},
+        skills = {
+            {id="fireball", name="화염구", desc="적에게 INT 기반 화염 데미지", cooldown=4, duration=0, type="attack", value=0, element="fire"},
+            {id="ice_lance", name="얼음 창", desc="적에게 INT 기반 빙결 데미지", cooldown=4, duration=0, type="attack", value=0, element="ice"},
+            {id="chain_lightning", name="연쇄 번개", desc="적에게 INT 기반 번개 데미지", cooldown=5, duration=0, type="attack", value=0, element="lightning"},
+        },
     },
     {
         id = "paladin", name = "성기사", color = {1, 1, 0.5},
         desc = "신의 전사. 신성 무기에 능하고 언데드/악마에 강하다.",
         statBonus = {str=2, dex=0, int=2, con=3, lck=1},
         profBonus = {holy=5, strike=2},
-        startWeapon = "holy_mace",
-        startArmor = "chain_mail",
+        startWeapon = "holy_mace", startArmor = "chain_mail",
         startItems = {"health_potion"},
-        skills = {{id="holy_smite", name="신성한 강타", desc="적에게 신성 데미지 (언데드/악마 2배)", cooldown=5, duration=0, type="attack", value=0, element="holy"}},
+        skills = {
+            {id="holy_smite", name="신성한 강타", desc="적에게 신성 데미지 (언데드/악마 2배)", cooldown=5, duration=0, type="attack", value=0, element="holy"},
+            {id="lay_on_hands", name="안수 치유", desc="HP를 INT*4 만큼 회복", cooldown=8, duration=0, type="heal"},
+        },
     },
     {
         id = "ranger", name = "궁수", color = {0.3, 0.8, 0.3},
         desc = "민첩한 사냥꾼. 찌르기 무기에 능하고 회피가 높다.",
         statBonus = {str=1, dex=4, int=1, con=1, lck=2},
         profBonus = {pierce=4, slash=1},
-        startWeapon = "dagger",
-        startArmor = "leather_armor",
+        startWeapon = "dagger", startArmor = "leather_armor",
         startItems = {"health_potion", "health_potion"},
-        skills = {{id="precise_shot", name="정밀 사격", desc="다음 공격 명중 100% + 방어 무시", cooldown=6, duration=0, type="nextAtk", value=1.5}},
+        skills = {
+            {id="precise_shot", name="정밀 사격", desc="다음 공격 명중 100% + 방어 무시", cooldown=6, duration=0, type="nextAtk", value=1.5},
+            {id="rain_of_arrows", name="화살 비", desc="적에게 찌르기 데미지 x2", cooldown=7, duration=0, type="attack", value=16, element="pierce"},
+        },
     },
     {
         id = "priest", name = "사제", color = {1, 1, 0.8},
         desc = "신성한 치유사. 신성 마법에 능하고 HP 회복 능력이 뛰어나다.",
         statBonus = {str=0, dex=1, int=4, con=3, lck=1},
         profBonus = {holy=4, strike=1},
-        startWeapon = "holy_mace",
-        startArmor = nil,
+        startWeapon = "holy_mace", startArmor = nil,
         startItems = {"health_potion", "health_potion", "health_potion"},
-        skills = {{id="heal", name="치유", desc="HP를 INT*3 만큼 회복", cooldown=5, duration=0, type="heal"}},
+        skills = {
+            {id="heal", name="치유", desc="HP를 INT*3 만큼 회복", cooldown=5, duration=0, type="heal"},
+            {id="smite_evil", name="사악 퇴치", desc="신성 데미지 (언데드/악마 3배)", cooldown=6, duration=0, type="attack", value=0, element="holy"},
+        },
     },
     {
         id = "berserker", name = "광전사", color = {1, 0.2, 0.1},
         desc = "분노의 전사. 양손 무기에 능하고 광폭화 시 초강력 공격.",
         statBonus = {str=5, dex=0, int=0, con=3, lck=0},
         profBonus = {slash=3, strike=3},
-        startWeapon = "long_sword",
-        startArmor = nil,
+        startWeapon = "long_sword", startArmor = nil,
         startItems = {"health_potion"},
-        skills = {{id="berserk", name="광폭화", desc="공격력 2배, 방어 0 (5턴)", cooldown=15, duration=5, type="buff"}},
+        skills = {
+            {id="berserk", name="광폭화", desc="공격력 2배, 방어 0 (5턴)", cooldown=15, duration=5, type="buff"},
+            {id="cleave", name="대회전", desc="강력한 참격 데미지", cooldown=6, duration=0, type="attack", value=20, element="slash"},
+        },
+    },
+    -- === 신규 직업 8~20 ===
+    {
+        id = "necromancer", name = "강령술사", color = {0.4, 0.2, 0.5},
+        desc = "죽음의 마법사. 독/빙결 마법에 특화되고 생명력 흡수 능력.",
+        statBonus = {str=0, dex=1, int=6, con=1, lck=1},
+        profBonus = {poison=4, ice=3},
+        startWeapon = "flame_dagger", startArmor = nil,
+        startItems = {"health_potion"},
+        skills = {
+            {id="death_bolt", name="죽음의 화살", desc="적에게 독 데미지 + HP 흡수", cooldown=4, duration=0, type="attack", value=0, element="poison"},
+            {id="corpse_explosion", name="시체 폭발", desc="강력한 독 폭발 데미지", cooldown=8, duration=0, type="attack", value=25, element="poison"},
+        },
+    },
+    {
+        id = "monk", name = "수도승", color = {0.9, 0.7, 0.3},
+        desc = "맨손 격투의 달인. 타격에 극도로 뛰어나고 회피가 높다.",
+        statBonus = {str=2, dex=4, int=1, con=2, lck=2},
+        profBonus = {strike=5, pierce=1},
+        startWeapon = nil, startArmor = nil,
+        startItems = {"health_potion", "health_potion"},
+        skills = {
+            {id="flurry_blows", name="연타", desc="다음 공격 3회 연속 타격", cooldown=7, duration=0, type="nextAtk", value=1.0},
+            {id="inner_peace", name="내면의 평화", desc="HP 회복 + 방어 상승 (3턴)", cooldown=10, duration=3, type="buff"},
+        },
+    },
+    {
+        id = "warlock", name = "흑마법사", color = {0.6, 0.1, 0.3},
+        desc = "어둠의 계약자. 화염/독 마법에 강하지만 체력이 낮다.",
+        statBonus = {str=0, dex=2, int=5, con=0, lck=2},
+        profBonus = {fire=4, poison=3},
+        startWeapon = "flame_dagger", startArmor = nil,
+        startItems = {"health_potion"},
+        skills = {
+            {id="shadow_bolt", name="어둠의 화살", desc="적에게 강력한 마법 데미지", cooldown=3, duration=0, type="attack", value=0, element="fire"},
+            {id="dark_pact", name="어둠의 계약", desc="HP 소모 → 공격력 대폭 상승 (3턴)", cooldown=12, duration=3, type="buff"},
+        },
+    },
+    {
+        id = "shaman", name = "주술사", color = {0.3, 0.6, 0.5},
+        desc = "원소의 중재자. 번개/빙결에 뛰어나고 치유도 가능하다.",
+        statBonus = {str=1, dex=2, int=4, con=2, lck=2},
+        profBonus = {lightning=4, ice=2},
+        startWeapon = "short_sword", startArmor = "leather_armor",
+        startItems = {"health_potion"},
+        skills = {
+            {id="lightning_bolt", name="번개 화살", desc="적에게 INT 기반 번개 데미지", cooldown=4, duration=0, type="attack", value=0, element="lightning"},
+            {id="spirit_heal", name="정령 치유", desc="HP를 INT*2 만큼 회복", cooldown=6, duration=0, type="heal"},
+        },
+    },
+    {
+        id = "assassin", name = "암살자", color = {0.3, 0.3, 0.3},
+        desc = "일격필살의 전문가. DEX/LCK 극대화, 독 무기 전문.",
+        statBonus = {str=1, dex=5, int=0, con=0, lck=4},
+        profBonus = {pierce=4, poison=3},
+        startWeapon = "dagger", startArmor = nil,
+        startItems = {"health_potion", "health_potion"},
+        skills = {
+            {id="death_strike", name="암살", desc="다음 공격 치명타 확정 (4배 데미지)", cooldown=10, duration=0, type="nextAtk", value=4.0},
+            {id="poison_blade", name="독날", desc="다음 공격에 독 데미지 추가", cooldown=5, duration=0, type="nextAtk", value=1.5},
+        },
+    },
+    {
+        id = "knight", name = "기사", color = {0.7, 0.7, 0.9},
+        desc = "명예로운 수호자. 방어력 극대화, 참격 무기 전문.",
+        statBonus = {str=2, dex=1, int=0, con=5, lck=0},
+        profBonus = {slash=3, strike=2},
+        startWeapon = "steel_sword", startArmor = "chain_mail",
+        startItems = {"health_potion"},
+        skills = {
+            {id="bulwark", name="철벽 방어", desc="방어력 +8 (4턴)", cooldown=8, duration=4, type="buff"},
+            {id="justice_strike", name="정의의 일격", desc="CON 기반 참격 데미지", cooldown=6, duration=0, type="attack", value=15, element="slash"},
+        },
+    },
+    {
+        id = "druid", name = "드루이드", color = {0.2, 0.7, 0.2},
+        desc = "자연의 수호자. 독/빙결 마법과 치유에 뛰어나다.",
+        statBonus = {str=1, dex=2, int=4, con=2, lck=2},
+        profBonus = {poison=3, ice=3},
+        startWeapon = "short_sword", startArmor = "leather_armor",
+        startItems = {"health_potion", "health_potion"},
+        skills = {
+            {id="entangle", name="덩굴 속박", desc="적에게 독 데미지 + 감속", cooldown=5, duration=0, type="attack", value=12, element="poison"},
+            {id="nature_heal", name="자연 치유", desc="HP를 INT*3 만큼 회복 + 재생 (3턴)", cooldown=7, duration=0, type="heal"},
+        },
+    },
+    {
+        id = "battle_mage", name = "전투 마법사", color = {0.6, 0.4, 0.8},
+        desc = "마법과 검술을 겸비한 전사. 근접+마법 하이브리드.",
+        statBonus = {str=2, dex=1, int=3, con=2, lck=0},
+        profBonus = {slash=2, fire=2, lightning=2},
+        startWeapon = "steel_sword", startArmor = "leather_armor",
+        startItems = {"health_potion"},
+        skills = {
+            {id="arcane_strike", name="비전 강타", desc="다음 공격에 INT 기반 추가 데미지", cooldown=5, duration=0, type="nextAtk", value=2.0},
+            {id="flame_shield", name="화염 방패", desc="반사 데미지 + 방어 상승 (4턴)", cooldown=10, duration=4, type="buff"},
+        },
+    },
+    {
+        id = "summoner", name = "소환사", color = {0.5, 0.3, 0.8},
+        desc = "이계의 힘을 빌리는 마법사. 다양한 원소 소환 공격.",
+        statBonus = {str=0, dex=1, int=6, con=1, lck=2},
+        profBonus = {fire=2, ice=2, lightning=2, poison=2},
+        startWeapon = "flame_dagger", startArmor = nil,
+        startItems = {"health_potion"},
+        skills = {
+            {id="summon_fire", name="화염 정령", desc="강력한 화염 폭발 소환", cooldown=5, duration=0, type="attack", value=0, element="fire"},
+            {id="summon_ice", name="빙결 정령", desc="강력한 빙결 폭풍 소환", cooldown=5, duration=0, type="attack", value=0, element="ice"},
+            {id="summon_storm", name="폭풍 정령", desc="강력한 번개 폭풍 소환", cooldown=5, duration=0, type="attack", value=0, element="lightning"},
+        },
+    },
+    {
+        id = "bard", name = "음유시인", color = {0.9, 0.6, 0.8},
+        desc = "노래로 아군을 강화하는 전사. 다양한 버프 스킬 보유.",
+        statBonus = {str=1, dex=3, int=2, con=1, lck=4},
+        profBonus = {pierce=2, slash=2},
+        startWeapon = "short_sword", startArmor = "leather_armor",
+        startItems = {"health_potion", "health_potion"},
+        skills = {
+            {id="war_song", name="전쟁의 노래", desc="공격력 +40% (5턴)", cooldown=12, duration=5, type="buff"},
+            {id="healing_melody", name="치유의 선율", desc="HP를 INT*3 만큼 회복", cooldown=6, duration=0, type="heal"},
+        },
+    },
+    {
+        id = "alchemist", name = "연금술사", color = {0.7, 0.8, 0.3},
+        desc = "약물과 폭발물의 전문가. 독/화염에 뛰어나고 포션 효과 강화.",
+        statBonus = {str=0, dex=2, int=4, con=2, lck=3},
+        profBonus = {poison=4, fire=3},
+        startWeapon = "short_sword", startArmor = nil,
+        startItems = {"health_potion", "health_potion", "large_potion"},
+        skills = {
+            {id="acid_flask", name="산성 플라스크", desc="적에게 독 폭발 데미지", cooldown=4, duration=0, type="attack", value=0, element="poison"},
+            {id="fortify", name="강화 물약", desc="모든 스탯 +2 (5턴)", cooldown=12, duration=5, type="buff"},
+        },
+    },
+    {
+        id = "spellblade", name = "마검사", color = {0.5, 0.5, 1},
+        desc = "마법을 검에 담는 전사. 참격+원소 복합 공격 전문.",
+        statBonus = {str=3, dex=2, int=3, con=1, lck=0},
+        profBonus = {slash=3, fire=2, ice=2},
+        startWeapon = "steel_sword", startArmor = "leather_armor",
+        startItems = {"health_potion"},
+        skills = {
+            {id="frost_blade", name="서리 검", desc="다음 공격에 빙결 데미지 추가 (2배)", cooldown=5, duration=0, type="nextAtk", value=2.0},
+            {id="inferno_slash", name="업화 참격", desc="적에게 화염 참격 데미지", cooldown=6, duration=0, type="attack", value=18, element="fire"},
+        },
+    },
+    {
+        id = "templar", name = "성전사", color = {0.9, 0.8, 0.3},
+        desc = "신성한 심판자. 신성/번개에 특화되고 언데드 사냥 전문.",
+        statBonus = {str=3, dex=0, int=2, con=3, lck=1},
+        profBonus = {holy=4, lightning=2, strike=2},
+        startWeapon = "holy_mace", startArmor = "chain_mail",
+        startItems = {"health_potion"},
+        skills = {
+            {id="judgment", name="심판", desc="신성+번개 복합 데미지", cooldown=6, duration=0, type="attack", value=20, element="holy"},
+            {id="divine_shield", name="신성 방패", desc="데미지 30% 감소 (4턴)", cooldown=10, duration=4, type="buff"},
+        },
     },
 }
 
@@ -856,9 +1169,24 @@ local function useSkill(skillIndex, targetEnemy)
     if s.type == "buff" then
         applyBuff(s.id, s.name, s.duration)
         addMessage("★ " .. s.name .. " 발동! (" .. s.duration .. "턴)")
+        -- 어둠의 계약: HP 25% 소모
+        if s.id == "dark_pact" then
+            local cost = math.floor(player.hp * 0.25)
+            player.hp = math.max(1, player.hp - cost)
+            addMessage("  HP -" .. cost .. " 소모!")
+        end
+        -- 내면의 평화: 즉시 소량 회복
+        if s.id == "inner_peace" then
+            local healAmt = player.int * 2
+            player.hp = math.min(player.hp + healAmt, getPlayerMaxHp())
+            addMessage("  HP +" .. healAmt .. " 회복!")
+        end
         return true
     elseif s.type == "heal" then
-        local healAmt = player.int * 3
+        local mult = 3
+        if s.id == "lay_on_hands" then mult = 4 end
+        if s.id == "spirit_heal" or s.id == "pixie_dust" then mult = 2 end
+        local healAmt = player.int * mult
         player.hp = math.min(player.hp + healAmt, getPlayerMaxHp())
         addMessage("★ " .. s.name .. "! HP +" .. healAmt .. " 회복!")
         return true
@@ -868,13 +1196,20 @@ local function useSkill(skillIndex, targetEnemy)
             s.currentCd = 0
             return false
         end
-        local dmg = math.max(1, player.int * 2 + player.level * 2)
+        local baseDmg = player.int * 2 + player.level * 2
+        local fixedVal = s.value or 0
+        local dmg = math.max(1, baseDmg + fixedVal)
         local elem = s.element or "physical"
         local elemMult = getElementMult(elem, targetEnemy.race)
-        if s.id == "holy_smite" and (targetEnemy.race == "undead" or targetEnemy.race == "demon") then
-            dmg = dmg * 2
+        -- 신성 스킬: 언데드/악마에 보너스
+        if (s.id == "holy_smite" or s.id == "smite_evil" or s.id == "judgment") and (targetEnemy.race == "undead" or targetEnemy.race == "demon") then
+            local holyMult = 2
+            if s.id == "smite_evil" then holyMult = 3 end
+            dmg = dmg * holyMult
         end
-        dmg = math.max(1, math.floor(dmg * elemMult))
+        -- 숙련도 보너스
+        local profMult = getProficiencyBonus(elem)
+        dmg = math.max(1, math.floor(dmg * elemMult * profMult))
         if elemMult == 0 then
             addMessage(targetEnemy.name .. "은(는) 면역!")
             return true
@@ -882,11 +1217,17 @@ local function useSkill(skillIndex, targetEnemy)
         targetEnemy.hp = targetEnemy.hp - dmg
         local elemName = Item.ELEMENT_NAMES[elem] or elem
         addMessage("★ " .. s.name .. "! " .. targetEnemy.name .. "에게 " .. dmg .. " " .. elemName .. " 데미지!")
-        if s.id == "drain_life" then
-            local heal = math.floor(dmg * 0.5)
+        -- 생명력 흡수 계열
+        if s.id == "drain_life" or s.id == "blood_drain" or s.id == "death_bolt" or s.id == "divine_light" then
+            local healPct = 0.5
+            if s.id == "blood_drain" then healPct = 0.6 end
+            if s.id == "divine_light" then healPct = 0.3 end
+            local heal = math.floor(dmg * healPct)
             player.hp = math.min(player.hp + heal, getPlayerMaxHp())
             addMessage("  HP +" .. heal .. " 흡수!")
         end
+        -- 숙련도 성장
+        gainProficiency(elem)
         return true
     elseif s.type == "nextAtk" then
         player.nextAtkBonus = {name=s.name, mult=s.value, id=s.id}
@@ -948,6 +1289,16 @@ local function dealPlayerAttack(enemy)
     if hasBuff("berserk") then atk = atk * 2 end
     -- 전쟁 함성 버프: 공격력 +30%
     if hasBuff("war_cry") then atk = math.floor(atk * 1.3) end
+    -- 늑대 광기: 공격력 2.5배
+    if hasBuff("wolf_frenzy") then atk = math.floor(atk * 2.5) end
+    -- 전쟁의 노래: 공격력 +40%
+    if hasBuff("war_song") then atk = math.floor(atk * 1.4) end
+    -- 원시의 포효: 공격력 +20%
+    if hasBuff("primal_roar") then atk = math.floor(atk * 1.2) end
+    -- 어둠의 계약: 공격력 +80%
+    if hasBuff("dark_pact") then atk = math.floor(atk * 1.8) end
+    -- 강화 물약: 스탯 +2 → 공격력 약간 상승
+    if hasBuff("fortify") then atk = atk + 4 end
 
     local enemyDef = enemy.def or 0
 
@@ -1109,6 +1460,17 @@ local function enemyAttack(enemy)
         addMessage("  ★ 행운의 회피! " .. enemy.name .. "의 공격을 피했다!")
         return
     end
+    -- 그림자 은폐/연막탄/그림자 걸음: 회피 대폭 상승
+    if hasBuff("shadow_cloak") or hasBuff("smoke_bomb") or hasBuff("shadow_step") then
+        if math.random(1, 100) <= 70 then
+            addMessage("  ★ 은폐 효과! " .. enemy.name .. "의 공격을 피했다!")
+            return
+        end
+    end
+    -- 늑대 광기: 회피 소폭 상승
+    if hasBuff("wolf_frenzy") then
+        evasion = evasion + 15
+    end
 
     if hitRoll > enemyAcc - evasion then
         addMessage(enemy.name .. "의 공격을 회피했다!")
@@ -1120,16 +1482,33 @@ local function enemyAttack(enemy)
     if hasBuff("berserk") then def = 0 end
     -- 바위 피부: 방어력 +5
     if hasBuff("stone_skin") then def = def + 5 end
-    -- 마나 실드: 데미지 20% 감소 (아래에서 적용)
+    -- 강철 육체: 방어력 +10
+    if hasBuff("iron_body") then def = def + 10 end
+    -- 철벽 방어: 방어력 +8
+    if hasBuff("bulwark") then def = def + 8 end
+    -- 원시의 포효: 방어력 +20%
+    if hasBuff("primal_roar") then def = math.floor(def * 1.2) end
+    -- 강화 물약: 방어력 +2
+    if hasBuff("fortify") then def = def + 2 end
 
     local dmg = math.max(1, (enemy.atk or 0) - math.floor(def * 0.6))
     local variance = math.floor(dmg * 0.15)
     dmg = dmg + math.random(-variance, variance)
     dmg = math.max(1, dmg)
 
-    -- 마나 실드 데미지 감소
+    -- 마나 실드 데미지 감소 20%
     if hasBuff("mana_shield") then
         dmg = math.max(1, math.floor(dmg * 0.8))
+    end
+    -- 신성 방패 데미지 감소 30%
+    if hasBuff("divine_shield") then
+        dmg = math.max(1, math.floor(dmg * 0.7))
+    end
+    -- 화염 방패: 반사 데미지
+    if hasBuff("flame_shield") then
+        local reflect = math.floor(dmg * 0.25)
+        enemy.hp = enemy.hp - reflect
+        addMessage("  ★ 화염 방패 반사 " .. reflect .. " 데미지!")
     end
 
     -- 플레이어 속성 저항/약점 적용
@@ -1509,6 +1888,22 @@ function love.keypressed(key)
         elseif gameState == "inventory" then
             gameState = "playing"
             drag.item = nil
+            hoverItem = nil
+            return
+        end
+    end
+
+    -- 아이템 버리기 (D키)
+    if key == "d" and gameState == "inventory" then
+        if hoverItem and gameState == "inventory" then
+            local item = hoverItem
+            inv:removeItem(item)
+            table.insert(groundItems, {
+                x = player.x, y = player.y,
+                item = item,
+                picked = false,
+            })
+            addMessage(item.name .. " 버림!")
             hoverItem = nil
             return
         end
@@ -2198,7 +2593,8 @@ local function drawGame()
     hudY = hudY + 14
     love.graphics.print("부딪히기: 공격 | Space: 대기", hudX, hudY)
     hudY = hudY + 14
-    love.graphics.print("I/Tab: 인벤 | 1~4: 스킬", hudX, hudY)
+    local skCount = (player.skills and #player.skills) or 0
+    love.graphics.print("I/Tab: 인벤 | 1~" .. math.max(1, skCount) .. ": 스킬", hudX, hudY)
     hudY = hudY + 14
     love.graphics.print(">: 계단 | PgUp/Dn: 로그", hudX, hudY)
     hudY = hudY + 18
@@ -2321,7 +2717,7 @@ local function drawInventory()
     love.graphics.setColor(COLOR_GOLD)
     love.graphics.printf("EXTRACTION INVENTORY", 0, 10, sw, "center")
     love.graphics.setColor(COLOR_GRAY)
-    love.graphics.printf("좌클릭: 드래그 | 우클릭: 장착/사용 | I/Tab/Esc: 닫기", 0, 28, sw, "center")
+    love.graphics.printf("좌클릭: 드래그 | 우클릭: 장착/사용 | D: 버리기 | I/Tab/Esc: 닫기", 0, 28, sw, "center")
 
     -- 드래그 프리뷰
     if drag.item then
@@ -2582,18 +2978,34 @@ local function drawCharSelect()
         local listX = 30
         local infoX = sw * 0.45
         local startY = 50
+        local itemH = 20
+        local maxVisible = math.floor((sh - 100) / itemH)
+        local scrollOff = math.max(0, charSelect.raceSel - math.floor(maxVisible / 2))
+        scrollOff = math.min(scrollOff, math.max(0, #PLAYER_RACES - maxVisible))
 
         for i, race in ipairs(PLAYER_RACES) do
-            local y = startY + (i - 1) * 28
-            if i == charSelect.raceSel then
-                love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
-                love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, 26, 4, 4)
-                love.graphics.setColor(race.color[1], race.color[2], race.color[3])
-                love.graphics.print("▶ " .. race.name, listX, y)
-            else
-                love.graphics.setColor(0.6, 0.6, 0.6)
-                love.graphics.print("  " .. race.name, listX, y)
+            local vi = i - scrollOff
+            if vi >= 1 and vi <= maxVisible then
+                local y = startY + (vi - 1) * itemH
+                if i == charSelect.raceSel then
+                    love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
+                    love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, itemH - 1, 3, 3)
+                    love.graphics.setColor(race.color[1], race.color[2], race.color[3])
+                    love.graphics.print("▶ " .. race.name, listX, y)
+                else
+                    love.graphics.setColor(0.6, 0.6, 0.6)
+                    love.graphics.print("  " .. race.name, listX, y)
+                end
             end
+        end
+        -- 스크롤 인디케이터
+        if scrollOff > 0 then
+            love.graphics.setColor(COLOR_GRAY)
+            love.graphics.print("▲ 더 있음", listX, startY - 15)
+        end
+        if scrollOff + maxVisible < #PLAYER_RACES then
+            love.graphics.setColor(COLOR_GRAY)
+            love.graphics.print("▼ 더 있음", listX, startY + maxVisible * itemH)
         end
 
         -- 선택된 종족 상세 정보
@@ -2726,18 +3138,33 @@ local function drawCharSelect()
         local listX = 30
         local infoX = sw * 0.45
         local startY = 50
+        local itemH = 20
+        local maxVisible = math.floor((sh - 100) / itemH)
+        local scrollOff = math.max(0, charSelect.classSel - math.floor(maxVisible / 2))
+        scrollOff = math.min(scrollOff, math.max(0, #PLAYER_CLASSES - maxVisible))
 
         for i, cls in ipairs(PLAYER_CLASSES) do
-            local y = startY + (i - 1) * 28
-            if i == charSelect.classSel then
-                love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
-                love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, 26, 4, 4)
-                love.graphics.setColor(cls.color[1], cls.color[2], cls.color[3])
-                love.graphics.print("▶ " .. cls.name, listX, y)
-            else
-                love.graphics.setColor(0.6, 0.6, 0.6)
-                love.graphics.print("  " .. cls.name, listX, y)
+            local vi = i - scrollOff
+            if vi >= 1 and vi <= maxVisible then
+                local y = startY + (vi - 1) * itemH
+                if i == charSelect.classSel then
+                    love.graphics.setColor(0.2, 0.2, 0.35, 0.8)
+                    love.graphics.rectangle("fill", listX - 5, y - 2, sw * 0.4, itemH - 1, 3, 3)
+                    love.graphics.setColor(cls.color[1], cls.color[2], cls.color[3])
+                    love.graphics.print("▶ " .. cls.name, listX, y)
+                else
+                    love.graphics.setColor(0.6, 0.6, 0.6)
+                    love.graphics.print("  " .. cls.name, listX, y)
+                end
             end
+        end
+        if scrollOff > 0 then
+            love.graphics.setColor(COLOR_GRAY)
+            love.graphics.print("▲ 더 있음", listX, startY - 15)
+        end
+        if scrollOff + maxVisible < #PLAYER_CLASSES then
+            love.graphics.setColor(COLOR_GRAY)
+            love.graphics.print("▼ 더 있음", listX, startY + maxVisible * itemH)
         end
 
         local sel = PLAYER_CLASSES[charSelect.classSel]
