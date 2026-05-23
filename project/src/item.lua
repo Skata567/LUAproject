@@ -31,6 +31,8 @@ Item.RARITY_NAMES = {
 -- 장착 부위
 Item.SLOT_NAMES = {
     weapon  = "무기",
+    weapon1 = "주무기",
+    weapon2 = "보조",
     armor   = "방어구",
     helmet  = "투구",
     boots   = "신발",
@@ -50,6 +52,7 @@ function Item.new(data)
     self.slot = data.slot or nil       -- 장착 부위 (nil이면 장착 불가)
     self.icon = data.icon or "?"       -- 텍스트 아이콘
     self.stats = data.stats or {}      -- {atk=0, def=0, hp=0, ...}
+    self.twoHanded = data.twoHanded or false  -- 양손 무기 여부
     self.stackable = data.stackable or false
     self.count = data.count or 1
     self.color = data.color or {0.8, 0.8, 0.8}  -- 아이콘 색상
@@ -68,6 +71,7 @@ function Item:clone()
         slot = self.slot,
         icon = self.icon,
         stats = {},
+        twoHanded = self.twoHanded,
         stackable = self.stackable,
         count = self.count,
         color = {self.color[1], self.color[2], self.color[3]},
@@ -91,7 +95,9 @@ end
 --- 장착 부위 한글 이름
 function Item:getSlotName()
     if self.slot then
-        return Item.SLOT_NAMES[self.slot] or self.slot
+        local name = Item.SLOT_NAMES[self.slot] or self.slot
+        if self.twoHanded then name = name .. " (양손)" end
+        return name
     end
     return nil
 end
@@ -114,35 +120,70 @@ function Item:getStatsText()
     if self.stats.crit and self.stats.crit > 0 then
         table.insert(parts, "치명타 +" .. self.stats.crit .. "%")
     end
+    if self.twoHanded then
+        table.insert(parts, "[양손]")
+    end
     return table.concat(parts, "  ")
 end
 
 -- ===== 아이템 데이터베이스 =====
 Item.DATABASE = {
     -- 무기 (2x1, 1x3, 2x4 등)
+    -- 한손 무기
     short_sword = Item.new({
-        id = "short_sword", name = "단검", description = "가벼운 단검",
+        id = "short_sword", name = "단검", description = "가벼운 한손 단검",
         gridW = 1, gridH = 3, rarity = "common", slot = "weapon",
         icon = "/", color = {0.8, 0.8, 0.8},
         stats = {atk = 3},
     }),
+    dagger = Item.new({
+        id = "dagger", name = "비수", description = "빠른 한손 비수",
+        gridW = 1, gridH = 2, rarity = "uncommon", slot = "weapon",
+        icon = "-", color = {0.7, 0.9, 0.7},
+        stats = {atk = 4, crit = 8, spd = 2},
+    }),
+
+    -- 양손 무기
     long_sword = Item.new({
-        id = "long_sword", name = "장검", description = "긴 검",
+        id = "long_sword", name = "장검", description = "긴 양손 검",
         gridW = 1, gridH = 4, rarity = "uncommon", slot = "weapon",
+        twoHanded = true,
         icon = "|", color = {0.6, 0.8, 1.0},
         stats = {atk = 7, crit = 5},
     }),
     battle_axe = Item.new({
-        id = "battle_axe", name = "전투도끼", description = "무거운 도끼",
+        id = "battle_axe", name = "전투도끼", description = "무거운 양손 도끼",
         gridW = 2, gridH = 3, rarity = "rare", slot = "weapon",
+        twoHanded = true,
         icon = "P", color = {0.9, 0.5, 0.2},
         stats = {atk = 12, crit = 10},
     }),
     dragon_blade = Item.new({
-        id = "dragon_blade", name = "용의 검", description = "드래곤의 비늘로 만든 검",
+        id = "dragon_blade", name = "용의 검", description = "드래곤의 비늘로 만든 양손 검",
         gridW = 2, gridH = 5, rarity = "legendary", slot = "weapon",
+        twoHanded = true,
         icon = "†", color = {1.0, 0.4, 0.1},
         stats = {atk = 25, crit = 15},
+    }),
+
+    -- 방패 (보조 무기칸)
+    wooden_shield = Item.new({
+        id = "wooden_shield", name = "나무 방패", description = "기본 나무 방패",
+        gridW = 2, gridH = 2, rarity = "common", slot = "weapon",
+        icon = "]", color = {0.6, 0.45, 0.2},
+        stats = {def = 3},
+    }),
+    iron_shield = Item.new({
+        id = "iron_shield", name = "철 방패", description = "튼튼한 철 방패",
+        gridW = 2, gridH = 2, rarity = "uncommon", slot = "weapon",
+        icon = "]", color = {0.5, 0.5, 0.6},
+        stats = {def = 6, hp = 5},
+    }),
+    dragon_shield = Item.new({
+        id = "dragon_shield", name = "용린 방패", description = "용의 비늘로 만든 방패",
+        gridW = 2, gridH = 3, rarity = "legendary", slot = "weapon",
+        icon = "]", color = {1.0, 0.3, 0.1},
+        stats = {def = 15, hp = 20},
     }),
 
     -- 방어구 (2x3, 2x2 등)
