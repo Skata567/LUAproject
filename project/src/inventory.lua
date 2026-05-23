@@ -285,6 +285,10 @@ function Inventory:drawTooltip(item, mx, my)
     if item.description ~= "" then
         table.insert(lines, item.description)
     end
+    local passiveText = item:getPassiveText()
+    if passiveText then
+        table.insert(lines, passiveText)
+    end
     if item.slot then
         table.insert(lines, "[우클릭: 장착]")
     end
@@ -324,6 +328,8 @@ function Inventory:drawTooltip(item, mx, my)
             love.graphics.setColor(rc[1] * 0.8, rc[2] * 0.8, rc[3] * 0.8)
         elseif line:find("%[") then
             love.graphics.setColor(0.5, 0.8, 1)
+        elseif line:find("◆") then
+            love.graphics.setColor(0.7, 0.5, 1)
         else
             love.graphics.setColor(0.9, 0.9, 0.9)
         end
