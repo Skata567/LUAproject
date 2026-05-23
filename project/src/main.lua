@@ -71,28 +71,67 @@ local dungeonRun = 0        -- 던전 탐험 횟수
 
 -- 바닥 아이템 드롭 테이블 (층별 가중치)
 local DROP_TABLE = {
+    -- 소비/재료
     {id = "health_potion", weight = 30, minFloor = 1},
     {id = "large_potion",  weight = 10, minFloor = 2},
     {id = "gold_coin",     weight = 25, minFloor = 1},
+    -- 일반 무기
     {id = "short_sword",   weight = 15, minFloor = 1},
-    {id = "dagger",        weight = 12, minFloor = 1},
-    {id = "long_sword",    weight = 8,  minFloor = 2},
-    {id = "battle_axe",    weight = 5,  minFloor = 3},
+    {id = "rusty_sword",   weight = 18, minFloor = 1},
+    -- 고급 무기
+    {id = "dagger",        weight = 10, minFloor = 1},
+    {id = "steel_sword",   weight = 8,  minFloor = 2},
+    {id = "long_sword",    weight = 7,  minFloor = 2},
+    -- 희귀 무기
+    {id = "flame_dagger",  weight = 4,  minFloor = 3},
+    {id = "venom_blade",   weight = 4,  minFloor = 3},
+    {id = "battle_axe",    weight = 4,  minFloor = 3},
+    {id = "frost_halberd", weight = 3,  minFloor = 3},
+    -- 영웅 무기
+    {id = "vampiric_blade",     weight = 2, minFloor = 4},
+    {id = "thunder_sword",      weight = 2, minFloor = 4},
+    {id = "inferno_greatsword", weight = 2, minFloor = 4},
+    -- 전설 무기
+    {id = "dragon_blade",   weight = 1, minFloor = 5},
+    {id = "soul_reaper",    weight = 1, minFloor = 5},
+    {id = "abyssal_scythe", weight = 1, minFloor = 5},
+    -- 방패
     {id = "wooden_shield", weight = 12, minFloor = 1},
     {id = "iron_shield",   weight = 6,  minFloor = 2},
+    {id = "thorn_shield",  weight = 3,  minFloor = 3},
+    {id = "mirror_shield", weight = 2,  minFloor = 4},
     {id = "dragon_shield", weight = 1,  minFloor = 5},
+    -- 방어구
     {id = "leather_armor", weight = 12, minFloor = 1},
     {id = "chain_mail",    weight = 6,  minFloor = 2},
-    {id = "iron_helmet",   weight = 10, minFloor = 1},
-    {id = "leather_boots", weight = 10, minFloor = 1},
-    {id = "swift_boots",   weight = 4,  minFloor = 3},
-    {id = "copper_ring",   weight = 8,  minFloor = 1},
-    {id = "ruby_ring",     weight = 3,  minFloor = 4},
-    {id = "silver_amulet", weight = 6,  minFloor = 2},
-    {id = "royal_crown",   weight = 2,  minFloor = 4},
-    {id = "dragon_scale",  weight = 1,  minFloor = 5},
-    {id = "dragon_blade",  weight = 1,  minFloor = 5},
+    {id = "plate_armor",   weight = 3,  minFloor = 3},
+    {id = "shadow_robe",   weight = 2,  minFloor = 4},
     {id = "dragon_armor",  weight = 1,  minFloor = 5},
+    -- 투구
+    {id = "iron_helmet",     weight = 10, minFloor = 1},
+    {id = "mage_hat",        weight = 6,  minFloor = 2},
+    {id = "berserker_helm",  weight = 3,  minFloor = 3},
+    {id = "royal_crown",     weight = 2,  minFloor = 4},
+    {id = "dragon_helm",     weight = 1,  minFloor = 5},
+    -- 신발
+    {id = "leather_boots",  weight = 10, minFloor = 1},
+    {id = "iron_greaves",   weight = 6,  minFloor = 2},
+    {id = "swift_boots",    weight = 3,  minFloor = 3},
+    {id = "shadow_boots",   weight = 2,  minFloor = 4},
+    {id = "dragon_boots",   weight = 1,  minFloor = 5},
+    -- 반지
+    {id = "copper_ring",    weight = 8,  minFloor = 1},
+    {id = "silver_ring",    weight = 5,  minFloor = 2},
+    {id = "emerald_ring",   weight = 3,  minFloor = 3},
+    {id = "ruby_ring",      weight = 2,  minFloor = 4},
+    {id = "ring_of_power",  weight = 1,  minFloor = 5},
+    -- 목걸이
+    {id = "silver_amulet",      weight = 6, minFloor = 2},
+    {id = "healing_pendant",    weight = 3, minFloor = 3},
+    {id = "amulet_of_fury",     weight = 2, minFloor = 4},
+    {id = "amulet_of_eternity", weight = 1, minFloor = 5},
+    -- 재료
+    {id = "dragon_scale",  weight = 1,  minFloor = 5},
 }
 
 -- ===== 유틸리티 =====
@@ -376,6 +415,39 @@ local function getPlayerMaxHp()
     return base + player.con * 3 + eqHp
 end
 
+--- 장비 패시브 효과 수집
+local function getEquipPassives()
+    local passives = {}
+    if not equip then return passives end
+    for _, item in pairs(equip.slots) do
+        if item and item.passive then
+            table.insert(passives, item.passive)
+        end
+    end
+    return passives
+end
+
+--- 특정 패시브 합산
+local function getPassiveValue(pType)
+    local total = 0
+    for _, p in ipairs(getEquipPassives()) do
+        if p.type == pType then
+            total = total + p.value
+        end
+    end
+    return total
+end
+
+--- 패시브 보정된 회피율
+local function getPlayerEvasionFull()
+    return getPlayerEvasion() + getPassiveValue("dodge_boost")
+end
+
+--- 패시브 보정된 치명타
+local function getPlayerCritFull()
+    return getPlayerCritChance() + getPassiveValue("crit_boost")
+end
+
 -- ===== 레벨업 =====
 local function checkLevelUp()
     while player.exp >= player.nextExp do
@@ -396,28 +468,36 @@ local function checkLevelUp()
     end
 end
 
--- ===== 전투 (DCSS 스타일 공식) =====
-local function attackEnemy(enemy)
+-- ===== 전투 (DCSS 스타일 공식 + 패시브 효과) =====
+
+--- 플레이어 → 적 한 번 공격 (내부 함수)
+local function dealPlayerAttack(enemy)
     local accuracy = getPlayerAccuracy()
     local hitRoll = math.random(1, 100)
     local evade = enemy.ev or 0
 
-    -- 명중 판정: accuracy - evasion vs roll
     if hitRoll > accuracy - evade then
         addMessage(enemy.name .. "이(가) 공격을 회피했다!")
-        return
+        return 0
     end
 
     local atk = getPlayerAtk()
-    local dmgReduction = math.floor((enemy.def or 0) * 0.6)
+    local enemyDef = enemy.def or 0
+
+    -- 방어관통 패시브
+    local armorBreak = getPassiveValue("armor_break")
+    if armorBreak > 0 then
+        enemyDef = math.floor(enemyDef * (1 - armorBreak / 100))
+    end
+
+    local dmgReduction = math.floor(enemyDef * 0.6)
     local baseDmg = math.max(1, atk - dmgReduction)
 
-    -- 데미지 변동 (±20%)
     local variance = math.floor(baseDmg * 0.2)
     local dmg = baseDmg + math.random(-variance, variance)
 
-    -- 치명타 판정
-    local critChance = getPlayerCritChance()
+    -- 치명타 판정 (패시브 보정)
+    local critChance = getPlayerCritFull()
     local isCrit = math.random(1, 100) <= critChance
     if isCrit then
         dmg = math.floor(dmg * getPlayerCritMult())
@@ -429,12 +509,60 @@ local function attackEnemy(enemy)
     if isCrit then msg = "★ 치명타! " .. msg end
     addMessage(msg)
 
+    -- 흡혈 패시브
+    local lifesteal = getPassiveValue("lifesteal")
+    if lifesteal > 0 then
+        local heal = math.max(1, math.floor(dmg * lifesteal / 100))
+        player.hp = math.min(player.maxHp, player.hp + heal)
+        addMessage("  ♥ 흡혈 +" .. heal .. " HP")
+    end
+
+    -- 화상 패시브
+    local burnVal = getPassiveValue("burn")
+    if burnVal > 0 and math.random(1, 100) <= 35 then
+        enemy.burn = (enemy.burn or 0) + burnVal
+        addMessage("  🔥 " .. enemy.name .. " 화상! (" .. burnVal .. "턴)")
+    end
+
+    -- 독 패시브
+    local poisonVal = getPassiveValue("poison")
+    if poisonVal > 0 and math.random(1, 100) <= 25 then
+        enemy.poison = (enemy.poison or 0) + poisonVal
+        addMessage("  ☠ " .. enemy.name .. " 중독! (" .. poisonVal .. "턴)")
+    end
+
+    -- 기절 패시브
+    local stunVal = getPassiveValue("stun")
+    if stunVal > 0 and math.random(1, 100) <= stunVal then
+        enemy.stunned = true
+        addMessage("  ⚡ " .. enemy.name .. " 기절!")
+    end
+
+    return dmg
+end
+
+local function attackEnemy(enemy)
+    local totalDmg = dealPlayerAttack(enemy)
+
+    -- 연속타격 패시브
+    if enemy.alive and enemy.hp > 0 then
+        local doubleHit = getPassiveValue("double_hit")
+        if doubleHit > 0 and math.random(1, 100) <= doubleHit then
+            addMessage("  >> 연속 타격!")
+            totalDmg = totalDmg + dealPlayerAttack(enemy)
+        end
+    end
+
     if enemy.hp <= 0 then
         enemy.alive = false
-        player.exp = player.exp + enemy.exp
-        addMessage(enemy.name .. " 처치! (+" .. enemy.exp .. " 경험치)")
 
-        -- 적 처치 시 아이템 드롭 (40% + LCK 보정)
+        -- 경험치 (exp_boost 패시브)
+        local expBoost = getPassiveValue("exp_boost")
+        local expGain = math.floor(enemy.exp * (1 + expBoost / 100))
+        player.exp = player.exp + expGain
+        addMessage(enemy.name .. " 처치! (+" .. expGain .. " 경험치)")
+
+        -- 아이템 드롭 (40% + LCK 보정)
         local dropChance = 0.4 + player.lck * 0.01
         if math.random() < dropChance then
             local drop = rollDrop()
@@ -448,8 +576,10 @@ local function attackEnemy(enemy)
             end
         end
 
-        -- 골드 드롭
+        -- 골드 드롭 (gold_boost 패시브)
+        local goldBoost = getPassiveValue("gold_boost")
         local goldDrop = math.random(1, 5) + floor * 2
+        goldDrop = math.floor(goldDrop * (1 + goldBoost / 100))
         player.gold = player.gold + goldDrop
         addMessage("  → " .. goldDrop .. "G 획득!")
 
@@ -458,11 +588,17 @@ local function attackEnemy(enemy)
 end
 
 local function enemyAttack(enemy)
-    local evasion = getPlayerEvasion()
+    -- 기절 체크
+    if enemy.stunned then
+        enemy.stunned = false
+        addMessage(enemy.name .. "은(는) 기절에서 깨어났다!")
+        return
+    end
+
+    local evasion = getPlayerEvasionFull()
     local hitRoll = math.random(1, 100)
     local enemyAcc = 60 + (enemy.atk or 0) * 2
 
-    -- 회피 판정
     if hitRoll > enemyAcc - evasion then
         addMessage(enemy.name .. "의 공격을 회피했다!")
         return
@@ -470,13 +606,38 @@ local function enemyAttack(enemy)
 
     local def = getPlayerDef()
     local dmg = math.max(1, (enemy.atk or 0) - math.floor(def * 0.6))
-    -- 데미지 변동
     local variance = math.floor(dmg * 0.15)
     dmg = dmg + math.random(-variance, variance)
     dmg = math.max(1, dmg)
 
     player.hp = player.hp - dmg
     addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
+
+    -- 가시/반사 패시브
+    local thorns = getPassiveValue("thorns")
+    if thorns > 0 then
+        enemy.hp = enemy.hp - thorns
+        addMessage("  ◆ 가시 반사 " .. thorns .. " 데미지!")
+        if enemy.hp <= 0 then
+            enemy.alive = false
+            player.exp = player.exp + enemy.exp
+            addMessage(enemy.name .. " 처치! (가시 반사)")
+            checkLevelUp()
+        end
+    end
+
+    local reflect = getPassiveValue("reflect")
+    if reflect > 0 then
+        local refDmg = math.max(1, math.floor(dmg * reflect / 100))
+        enemy.hp = enemy.hp - refDmg
+        addMessage("  ◆ 반사 " .. refDmg .. " 데미지!")
+        if enemy.hp <= 0 and enemy.alive then
+            enemy.alive = false
+            player.exp = player.exp + enemy.exp
+            addMessage(enemy.name .. " 처치! (반사)")
+            checkLevelUp()
+        end
+    end
 
     if player.hp <= 0 then
         gameState = "gameover"
@@ -540,6 +701,46 @@ local function checkStair()
     end
 end
 
+-- ===== 턴 상태효과 처리 =====
+local function processStatusEffects()
+    -- 적 화상/독 처리
+    for _, enemy in ipairs(enemies) do
+        if enemy.alive then
+            if enemy.burn and enemy.burn > 0 then
+                local burnDmg = 2
+                enemy.hp = enemy.hp - burnDmg
+                enemy.burn = enemy.burn - 1
+                addMessage("  " .. enemy.name .. " 화상 " .. burnDmg .. " 데미지! (남은 " .. enemy.burn .. "턴)")
+                if enemy.hp <= 0 then
+                    enemy.alive = false
+                    player.exp = player.exp + enemy.exp
+                    addMessage(enemy.name .. " 처치! (화상)")
+                    checkLevelUp()
+                end
+            end
+            if enemy.poison and enemy.poison > 0 then
+                local poisonDmg = 3
+                enemy.hp = enemy.hp - poisonDmg
+                enemy.poison = enemy.poison - 1
+                addMessage("  " .. enemy.name .. " 독 " .. poisonDmg .. " 데미지! (남은 " .. enemy.poison .. "턴)")
+                if enemy.hp <= 0 and enemy.alive then
+                    enemy.alive = false
+                    player.exp = player.exp + enemy.exp
+                    addMessage(enemy.name .. " 처치! (중독)")
+                    checkLevelUp()
+                end
+            end
+        end
+    end
+
+    -- 플레이어 재생 패시브
+    local regen = getPassiveValue("regen")
+    if regen > 0 and player.hp < player.maxHp then
+        player.hp = math.min(player.maxHp, player.hp + regen)
+        addMessage("재생 +" .. regen .. " HP")
+    end
+end
+
 -- ===== 적 AI =====
 local function moveEnemies()
     for _, enemy in ipairs(enemies) do
@@ -594,6 +795,7 @@ local function movePlayer(dx, dy)
         if enemy.alive and enemy.x == nx and enemy.y == ny then
             attackEnemy(enemy)
             turn = turn + 1
+            processStatusEffects()
             moveEnemies()
             return
         end
@@ -605,6 +807,7 @@ local function movePlayer(dx, dy)
 
     pickupItem()
     checkStair()
+    processStatusEffects()
     moveEnemies()
 end
 
@@ -786,6 +989,7 @@ function love.keypressed(key)
         movePlayer(1, 0)
     elseif key == "space" then
         turn = turn + 1
+        processStatusEffects()
         moveEnemies()
     elseif key == "pageup" then
         messageScroll = math.min(messageScroll + 3, math.max(0, #messages - MAX_VISIBLE_MESSAGES))
@@ -1260,10 +1464,25 @@ local function drawGame()
     love.graphics.print("방어: " .. getPlayerDef(), hudX + 70, hudY)
     hudY = hudY + 14
     love.graphics.setColor(0.4, 1, 0.4)
-    love.graphics.print("회피: " .. math.floor(getPlayerEvasion()) .. "%", hudX, hudY)
+    love.graphics.print("회피: " .. math.floor(getPlayerEvasionFull()) .. "%", hudX, hudY)
     love.graphics.setColor(1, 0.8, 0.3)
-    love.graphics.print("치명: " .. math.floor(getPlayerCritChance()) .. "%", hudX + 70, hudY)
+    love.graphics.print("치명: " .. math.floor(getPlayerCritFull()) .. "%", hudX + 70, hudY)
     hudY = hudY + 14
+
+    -- 패시브 효과 표시
+    local passives = getEquipPassives()
+    if #passives > 0 then
+        love.graphics.setColor(0.8, 0.6, 1)
+        love.graphics.print("--- 특수효과 ---", hudX, hudY)
+        hudY = hudY + 14
+        for _, p in ipairs(passives) do
+            local pName = Item.PASSIVE_NAMES[p.type] or p.type
+            love.graphics.setColor(0.7, 0.5, 1)
+            love.graphics.print("◆ " .. pName, hudX, hudY)
+            hudY = hudY + 13
+        end
+        hudY = hudY + 4
+    end
 
     love.graphics.setColor(COLOR_GOLD)
     love.graphics.print("골드: " .. player.gold, hudX, hudY)
@@ -1353,12 +1572,26 @@ local function drawInventory()
     love.graphics.setColor(0.4, 0.6, 1)
     love.graphics.print("방어: " .. getPlayerDef(), equip.x - 76, equip.y + 264)
     love.graphics.setColor(0.4, 1, 0.4)
-    love.graphics.print("회피: " .. math.floor(getPlayerEvasion()) .. "%", equip.x - 76, equip.y + 280)
+    love.graphics.print("회피: " .. math.floor(getPlayerEvasionFull()) .. "%", equip.x - 76, equip.y + 280)
     love.graphics.setColor(1, 0.8, 0.3)
-    love.graphics.print("치명: " .. math.floor(getPlayerCritChance()) .. "%", equip.x - 76, equip.y + 296)
+    love.graphics.print("치명: " .. math.floor(getPlayerCritFull()) .. "%", equip.x - 76, equip.y + 296)
     love.graphics.setColor(COLOR_WHITE)
     love.graphics.print("STR:" .. player.str .. " DEX:" .. player.dex .. " INT:" .. player.int, equip.x - 76, equip.y + 316)
     love.graphics.print("CON:" .. player.con .. " LCK:" .. player.lck, equip.x - 76, equip.y + 332)
+
+    -- 패시브 효과 표시
+    local passives = getEquipPassives()
+    if #passives > 0 then
+        local py = equip.y + 350
+        love.graphics.setColor(0.8, 0.6, 1)
+        love.graphics.print("--- 특수효과 ---", equip.x - 76, py)
+        py = py + 16
+        for _, p in ipairs(passives) do
+            love.graphics.setColor(0.7, 0.5, 1)
+            love.graphics.print("◆ " .. (p.desc or ""), equip.x - 76, py)
+            py = py + 14
+        end
+    end
 
     -- 타이틀
     love.graphics.setColor(COLOR_GOLD)
