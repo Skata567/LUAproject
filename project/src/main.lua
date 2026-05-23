@@ -64,8 +64,12 @@ local DROP_TABLE = {
     {id = "large_potion",  weight = 10, minFloor = 2},
     {id = "gold_coin",     weight = 25, minFloor = 1},
     {id = "short_sword",   weight = 15, minFloor = 1},
+    {id = "dagger",        weight = 12, minFloor = 1},
     {id = "long_sword",    weight = 8,  minFloor = 2},
     {id = "battle_axe",    weight = 5,  minFloor = 3},
+    {id = "wooden_shield", weight = 12, minFloor = 1},
+    {id = "iron_shield",   weight = 6,  minFloor = 2},
+    {id = "dragon_shield", weight = 1,  minFloor = 5},
     {id = "leather_armor", weight = 12, minFloor = 1},
     {id = "chain_mail",    weight = 6,  minFloor = 2},
     {id = "iron_helmet",   weight = 10, minFloor = 1},
@@ -589,8 +593,8 @@ function love.mousepressed(x, y, button)
             -- 장비 장착
             if item.slot then
                 inv:removeItem(item)
-                local prev = equip:equip(item)
-                if prev then
+                local removed = equip:equip(item)
+                for _, prev in ipairs(removed) do
                     inv:autoPlace(prev)
                 end
                 addMessage(item.name .. " 장착!")
@@ -628,9 +632,11 @@ function love.mousereleased(x, y, button)
         end
 
         local slot = equip:getSlotAt(x, y)
-        if slot and item.slot == slot then
-            local prev = equip:equip(item)
-            if prev then inv:autoPlace(prev) end
+        if slot and equip:canDropToSlot(item, slot) then
+            local removed = equip:equip(item, slot)
+            for _, prev in ipairs(removed) do
+                inv:autoPlace(prev)
+            end
             drag.item = nil
             return
         end
@@ -638,7 +644,7 @@ function love.mousereleased(x, y, button)
         if drag.fromInv then
             inv:autoPlace(item)
         elseif drag.fromSlot then
-            equip:equip(item)
+            equip:equip(item, drag.fromSlot)
         end
 
         drag.item = nil
