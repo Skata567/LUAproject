@@ -341,6 +341,44 @@ Item.DATABASE = {
         stats = {atk = 25, crit = 20, spd = 3}, element = "slash",
         passive = {type = "lifesteal", value = 20, desc = "공격 데미지의 20% HP 흡수"},
     }),
+    silver_spear = Item.new({
+        id = "silver_spear", name = "은빛 창", description = "신성한 은으로 만든 긴 창",
+        gridW = 1, gridH = 4, rarity = "uncommon", slot = "weapon",
+        twoHanded = true,
+        icon = "|", color = {0.9, 0.9, 1.0},
+        stats = {atk = 8, crit = 4}, element = "holy",
+    }),
+    storm_staff = Item.new({
+        id = "storm_staff", name = "폭풍 지팡이", description = "번개가 맴도는 마법 지팡이",
+        gridW = 1, gridH = 4, rarity = "rare", slot = "weapon",
+        twoHanded = true,
+        icon = "/", color = {1.0, 1.0, 0.25},
+        stats = {atk = 9, spd = 4, crit = 6}, element = "lightning",
+        passive = {type = "stun", value = 12, desc = "공격 시 12% 확률로 적 1턴 기절"},
+    }),
+    glacier_staff = Item.new({
+        id = "glacier_staff", name = "빙하 지팡이", description = "차가운 룬이 새겨진 지팡이",
+        gridW = 1, gridH = 4, rarity = "rare", slot = "weapon",
+        twoHanded = true,
+        icon = "/", color = {0.35, 0.8, 1.0},
+        stats = {atk = 10, def = 2}, element = "ice",
+        passive = {type = "stun", value = 14, desc = "공격 시 14% 확률로 적 1턴 빙결"},
+    }),
+    bone_wand = Item.new({
+        id = "bone_wand", name = "뼈 지팡이", description = "금지된 의식에 쓰이는 지팡이",
+        gridW = 1, gridH = 3, rarity = "rare", slot = "weapon",
+        icon = "/", color = {0.6, 0.9, 0.55},
+        stats = {atk = 7, crit = 8}, element = "poison",
+        passive = {type = "poison", value = 3, desc = "공격 시 30% 확률로 3턴간 독"},
+    }),
+    moon_katana = Item.new({
+        id = "moon_katana", name = "월광도", description = "달빛을 머금은 예리한 검",
+        gridW = 1, gridH = 4, rarity = "epic", slot = "weapon",
+        twoHanded = true,
+        icon = "/", color = {0.8, 0.85, 1.0},
+        stats = {atk = 17, crit = 18, spd = 3}, element = "slash",
+        passive = {type = "crit_boost", value = 8, desc = "치명타 +8%"},
+    }),
 
     -- =============================================
     -- 방패
@@ -414,6 +452,40 @@ Item.DATABASE = {
         icon = "D", color = {1.0, 0.3, 0.1},
         stats = {def = 22, hp = 35},
         passive = {type = "regen", value = 2, desc = "매 턴 HP 2 회복"},
+    }),
+    silk_robe = Item.new({
+        id = "silk_robe", name = "비단 로브", description = "가벼운 마법사용 로브",
+        gridW = 2, gridH = 3, rarity = "common", slot = "armor",
+        icon = "R", color = {0.75, 0.65, 1.0},
+        stats = {def = 2, hp = 4, spd = 3},
+    }),
+    inferno_robe = Item.new({
+        id = "inferno_robe", name = "화염 로브", description = "뜨거운 룬이 수놓인 로브",
+        gridW = 2, gridH = 3, rarity = "rare", slot = "armor",
+        icon = "R", color = {1.0, 0.25, 0.05},
+        stats = {def = 5, hp = 8, atk = 3}, 
+        passive = {type = "burn", value = 2, desc = "공격 시 20% 확률로 화상"},
+    }),
+    frost_mail = Item.new({
+        id = "frost_mail", name = "서리 사슬갑옷", description = "냉기가 흐르는 사슬갑옷",
+        gridW = 2, gridH = 3, rarity = "rare", slot = "armor",
+        icon = "M", color = {0.35, 0.75, 1.0},
+        stats = {def = 10, hp = 12},
+        passive = {type = "reflect", value = 8, desc = "피격 데미지의 8% 반사"},
+    }),
+    templar_plate = Item.new({
+        id = "templar_plate", name = "성전사 판금갑옷", description = "신성 문장이 새겨진 판금갑옷",
+        gridW = 2, gridH = 3, rarity = "epic", slot = "armor",
+        icon = "A", color = {1.0, 0.95, 0.65},
+        stats = {def = 16, hp = 18},
+        passive = {type = "regen", value = 1, desc = "매 턴 HP 1 회복"},
+    }),
+    necro_robe = Item.new({
+        id = "necro_robe", name = "강령 로브", description = "죽은 자의 속삭임이 맴도는 로브",
+        gridW = 2, gridH = 3, rarity = "epic", slot = "armor",
+        icon = "R", color = {0.35, 0.6, 0.35},
+        stats = {def = 8, hp = 10, atk = 4},
+        passive = {type = "lifesteal", value = 8, desc = "공격 데미지의 8% HP 흡수"},
     }),
 
     -- =============================================
