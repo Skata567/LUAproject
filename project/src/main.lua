@@ -381,7 +381,7 @@ function love.load()
     love.window.setTitle("Roguelike Dungeon")
     love.window.setMode(MAP_WIDTH * TILE_SIZE + 250, MAP_HEIGHT * TILE_SIZE + 10, {resizable = false})
 
-    font = love.graphics.newFont(14)
+    font = love.graphics.newFont("NanumGothicCoding.ttf", 14)
     love.graphics.setFont(font)
 
     math.randomseed(os.time())
