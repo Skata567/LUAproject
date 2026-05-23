@@ -37,7 +37,7 @@ local COLOR_GRAY     = {0.5, 0.5, 0.5}
 local COLOR_GOLD     = {1, 0.85, 0}
 
 -- 게임 상태
-local gameState = "playing" -- playing, inventory, town, shop, stash, gameover, levelup
+local gameState = "playing" -- playing, inventory, town, shop, stash, gameover, levelup, bestiary
 local map = {}
 local rooms = {}
 local player = {}
@@ -66,7 +66,8 @@ local hoverItem = nil
 local shop = nil
 local stash = nil           -- 보관함 (마을 인벤토리)
 local townMenuSel = 1       -- 마을 메뉴 선택
-local TOWN_MENU = {"상점", "보관함", "던전 출발", "저장"}
+local TOWN_MENU = {"상점", "보관함", "도감", "던전 출발", "저장"}
+local bestiaryScroll = 0
 local dungeonRun = 0        -- 던전 탐험 횟수
 
 -- 바닥 아이템 드롭 테이블 (층별 가중치)
@@ -91,6 +92,11 @@ local DROP_TABLE = {
     {id = "vampiric_blade",     weight = 2, minFloor = 4},
     {id = "thunder_sword",      weight = 2, minFloor = 4},
     {id = "inferno_greatsword", weight = 2, minFloor = 4},
+    -- 희귀 무기 (추가)
+    {id = "holy_mace",     weight = 3,  minFloor = 3},
+    {id = "ice_stiletto",  weight = 3,  minFloor = 3},
+    -- 고급 양손 (추가)
+    {id = "war_hammer",    weight = 6,  minFloor = 2},
     -- 전설 무기
     {id = "dragon_blade",   weight = 1, minFloor = 5},
     {id = "soul_reaper",    weight = 1, minFloor = 5},
@@ -242,38 +248,137 @@ local function createMap()
     end
 end
 
--- ===== 몬스터 데이터베이스 (DCSS 스타일) =====
+-- ===== 종족/속성 시스템 =====
+
+-- 종족 데이터베이스
+local RACE_DB = {
+    human = {
+        name = "인간", desc = "균형 잡힌 종족. 특별한 약점이나 저항이 없다.",
+        color = {0.9, 0.8, 0.7},
+        resist = {},  -- 저항 없음
+        weak = {},    -- 약점 없음
+    },
+    beast = {
+        name = "야수", desc = "야생의 동물. 빠르지만 마법에 약하다.",
+        color = {0.7, 0.5, 0.3},
+        resist = {pierce = 0.2},
+        weak = {fire = 0.3, lightning = 0.2},
+    },
+    goblinoid = {
+        name = "고블린류", desc = "작고 교활한 종족. 독에 강하지만 신성에 약하다.",
+        color = {0.2, 0.7, 0.2},
+        resist = {poison = 0.3},
+        weak = {holy = 0.3},
+    },
+    undead = {
+        name = "언데드", desc = "죽은 자. 독/빙결 면역이지만 화염/신성에 매우 약하다.",
+        color = {0.4, 0.5, 0.3},
+        resist = {poison = 1.0, ice = 0.5, slash = 0.3},
+        weak = {fire = 0.5, holy = 0.5, strike = 0.3},
+    },
+    demon = {
+        name = "악마", desc = "지옥의 존재. 화염에 강하지만 신성/빙결에 약하다.",
+        color = {0.8, 0.1, 0.2},
+        resist = {fire = 0.5, poison = 0.3},
+        weak = {holy = 0.5, ice = 0.3},
+    },
+    dragon = {
+        name = "용족", desc = "고대의 비늘 전사. 화염에 강하고 참격에 저항한다.",
+        color = {1.0, 0.5, 0.1},
+        resist = {fire = 0.5, slash = 0.3},
+        weak = {ice = 0.3, pierce = 0.2},
+    },
+    construct = {
+        name = "구조체", desc = "무기물/인공물. 독/화염 면역. 번개/타격에 약하다.",
+        color = {0.6, 0.6, 0.6},
+        resist = {poison = 1.0, fire = 0.3, slash = 0.3, pierce = 0.3},
+        weak = {lightning = 0.5, strike = 0.5},
+    },
+    insect = {
+        name = "곤충", desc = "작은 다지류. 독에 강하지만 화염에 매우 약하다.",
+        color = {0.3, 0.6, 0.2},
+        resist = {poison = 0.5},
+        weak = {fire = 0.5, strike = 0.3},
+    },
+    reptile = {
+        name = "파충류", desc = "냉혈 생물. 독에 저항하지만 빙결에 약하다.",
+        color = {0.2, 0.6, 0.4},
+        resist = {poison = 0.3},
+        weak = {ice = 0.4},
+    },
+    orc = {
+        name = "오크", desc = "강인한 전사 종족. 타격에 강하지만 마법에 약하다.",
+        color = {0.5, 0.7, 0.2},
+        resist = {strike = 0.2},
+        weak = {lightning = 0.2, fire = 0.15},
+    },
+    troll = {
+        name = "트롤", desc = "재생력이 뛰어난 거인. 화염에 매우 약하다.",
+        color = {0.3, 0.6, 0.3},
+        resist = {strike = 0.2, poison = 0.2},
+        weak = {fire = 0.5},
+    },
+    elf = {
+        name = "엘프", desc = "마법 친화적 종족. 마법에 저항하지만 물리에 약하다.",
+        color = {0.4, 0.3, 0.7},
+        resist = {fire = 0.2, ice = 0.2, lightning = 0.2},
+        weak = {strike = 0.3, slash = 0.15},
+    },
+}
+
+--- 속성 상성 데미지 배율 계산
+local function getElementMult(element, race)
+    if not race or not RACE_DB[race] then return 1.0 end
+    local raceData = RACE_DB[race]
+
+    -- 저항 체크 (데미지 감소)
+    local resist = raceData.resist[element]
+    if resist then
+        if resist >= 1.0 then return 0 end  -- 면역
+        return 1.0 - resist
+    end
+
+    -- 약점 체크 (데미지 증가)
+    local weak = raceData.weak[element]
+    if weak then
+        return 1.0 + weak
+    end
+
+    return 1.0
+end
+
+-- ===== 몬스터 데이터베이스 (DCSS 스타일 + 종족) =====
 local ENEMY_DB = {
     -- 1층: 약한 적
-    {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}},
-    {name="고블린",      char="g", hp=6,  atk=2, def=0, spd=1.0, exp=6,  ev=10, color={0,0.8,0},     floors={1,2,3}},
-    {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}},
-    {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}},
-    {name="좀비",        char="z", hp=10, atk=2, def=2, spd=0.5, exp=8,  ev=0,  color={0.3,0.5,0.2}, floors={1,2,3}},
+    {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}, race="beast", atkElement="pierce"},
+    {name="고블린",      char="g", hp=6,  atk=2, def=0, spd=1.0, exp=6,  ev=10, color={0,0.8,0},     floors={1,2,3}, race="goblinoid", atkElement="slash"},
+    {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}, race="goblinoid", atkElement="pierce"},
+    {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}, race="beast", atkElement="pierce"},
+    {name="좀비",        char="z", hp=10, atk=2, def=2, spd=0.5, exp=8,  ev=0,  color={0.3,0.5,0.2}, floors={1,2,3}, race="undead", atkElement="strike"},
     -- 2층: 중간 적
-    {name="오크",        char="o", hp=12, atk=4, def=2, spd=1.0, exp=12, ev=8,  color={0.5,0.8,0.2}, floors={2,3,4}},
-    {name="스켈레톤",    char="s", hp=8,  atk=3, def=4, spd=0.8, exp=10, ev=5,  color={0.9,0.9,0.8}, floors={2,3}},
-    {name="독거미",      char="S", hp=7,  atk=3, def=0, spd=1.3, exp=10, ev=18, color={0.2,0.7,0.2}, floors={2,3}},
-    {name="늑대",        char="w", hp=9,  atk=4, def=1, spd=1.4, exp=10, ev=15, color={0.5,0.5,0.5}, floors={2,3}},
-    {name="오크전사",    char="O", hp=18, atk=5, def=3, spd=0.9, exp=18, ev=8,  color={0.5,0.6,0.2}, floors={2,3,4}},
+    {name="오크",        char="o", hp=12, atk=4, def=2, spd=1.0, exp=12, ev=8,  color={0.5,0.8,0.2}, floors={2,3,4}, race="orc", atkElement="slash"},
+    {name="스켈레톤",    char="s", hp=8,  atk=3, def=4, spd=0.8, exp=10, ev=5,  color={0.9,0.9,0.8}, floors={2,3}, race="undead", atkElement="slash"},
+    {name="독거미",      char="S", hp=7,  atk=3, def=0, spd=1.3, exp=10, ev=18, color={0.2,0.7,0.2}, floors={2,3}, race="insect", atkElement="poison"},
+    {name="늑대",        char="w", hp=9,  atk=4, def=1, spd=1.4, exp=10, ev=15, color={0.5,0.5,0.5}, floors={2,3}, race="beast", atkElement="pierce"},
+    {name="오크전사",    char="O", hp=18, atk=5, def=3, spd=0.9, exp=18, ev=8,  color={0.5,0.6,0.2}, floors={2,3,4}, race="orc", atkElement="strike"},
     -- 3층: 강한 적
-    {name="트롤",        char="T", hp=25, atk=7, def=3, spd=0.7, exp=25, ev=5,  color={0.3,0.6,0.3}, floors={3,4}},
-    {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}},
-    {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}},
-    {name="미노타우로스",char="M", hp=30, atk=8, def=4, spd=1.0, exp=30, ev=6,  color={0.6,0.3,0.1}, floors={3,4,5}},
-    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}},
+    {name="트롤",        char="T", hp=25, atk=7, def=3, spd=0.7, exp=25, ev=5,  color={0.3,0.6,0.3}, floors={3,4}, race="troll", atkElement="strike"},
+    {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}, race="construct", atkElement="strike"},
+    {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}, race="reptile", atkElement="slash"},
+    {name="미노타우로스",char="M", hp=30, atk=8, def=4, spd=1.0, exp=30, ev=6,  color={0.6,0.3,0.1}, floors={3,4,5}, race="beast", atkElement="strike"},
+    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}, race="human", atkElement="fire"},
     -- 4층: 엘리트
-    {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}},
-    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}},
-    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}},
-    {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}},
-    {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}},
+    {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}, race="troll", atkElement="strike"},
+    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}, race="elf", atkElement="lightning"},
+    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}, race="human", atkElement="poison"},
+    {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}, race="construct", atkElement="strike"},
+    {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}, race="demon", atkElement="fire"},
     -- 5층: 보스급
-    {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}},
-    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}},
-    {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}},
-    {name="악마",        char="&", hp=50, atk=16,def=6, spd=1.2, exp=90, ev=18, color={0.8,0.1,0.1}, floors={5}},
-    {name="고대용",      char="@", hp=100,atk=20,def=10,spd=0.9, exp=150,ev=8,  color={1.0,0.8,0.0}, floors={5}},
+    {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}, race="dragon", atkElement="fire"},
+    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}, race="undead", atkElement="ice"},
+    {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}, race="construct", atkElement="strike"},
+    {name="악마",        char="&", hp=50, atk=16,def=6, spd=1.2, exp=90, ev=18, color={0.8,0.1,0.1}, floors={5}, race="demon", atkElement="fire"},
+    {name="고대용",      char="@", hp=100,atk=20,def=10,spd=0.9, exp=150,ev=8,  color={1.0,0.8,0.0}, floors={5}, race="dragon", atkElement="fire"},
 }
 
 -- ===== 적 생성 =====
@@ -317,6 +422,8 @@ local function spawnEnemies()
                 exp = math.floor(etype.exp * scale),
                 color = etype.color,
                 alive = true,
+                race = etype.race or "human",
+                atkElement = etype.atkElement or "physical",
             })
         end
     end
@@ -448,6 +555,14 @@ local function getPlayerCritFull()
     return getPlayerCritChance() + getPassiveValue("crit_boost")
 end
 
+--- 장착 무기의 공격 속성
+local function getPlayerElement()
+    if not equip then return "physical" end
+    local w1 = equip:getItem("weapon1")
+    if w1 and w1.element then return w1.element end
+    return "physical"
+end
+
 -- ===== 레벨업 =====
 local function checkLevelUp()
     while player.exp >= player.nextExp do
@@ -504,9 +619,23 @@ local function dealPlayerAttack(enemy)
     end
     dmg = math.max(1, dmg)
 
+    -- 속성 상성 적용
+    local pElement = getPlayerElement()
+    local elemMult = getElementMult(pElement, enemy.race)
+    if elemMult == 0 then
+        addMessage(enemy.name .. "은(는) " .. (Item.ELEMENT_NAMES[pElement] or pElement) .. " 면역!")
+        return 0
+    end
+    dmg = math.max(1, math.floor(dmg * elemMult))
+
     enemy.hp = enemy.hp - dmg
     local msg = enemy.name .. "에게 " .. dmg .. " 데미지!"
     if isCrit then msg = "★ 치명타! " .. msg end
+    if elemMult > 1.0 then
+        msg = msg .. " (약점!)"
+    elseif elemMult < 1.0 then
+        msg = msg .. " (저항)"
+    end
     addMessage(msg)
 
     -- 흡혈 패시브
@@ -611,7 +740,13 @@ local function enemyAttack(enemy)
     dmg = math.max(1, dmg)
 
     player.hp = player.hp - dmg
-    addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
+    local eElem = enemy.atkElement or "physical"
+    local elemName = Item.ELEMENT_NAMES[eElem] or eElem
+    if eElem ~= "physical" then
+        addMessage(enemy.name .. "이(가) " .. dmg .. " " .. elemName .. " 데미지!")
+    else
+        addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
+    end
 
     -- 가시/반사 패시브
     local thorns = getPassiveValue("thorns")
@@ -931,11 +1066,30 @@ function love.keypressed(key)
                 gameState = "stash"
                 drag.item = nil
                 hoverItem = nil
+            elseif sel == "도감" then
+                gameState = "bestiary"
+                bestiaryScroll = 0
             elseif sel == "던전 출발" then
                 startDungeon()
             elseif sel == "저장" then
                 addMessage("게임이 저장되었습니다!")
             end
+        end
+        return
+    end
+
+    -- 도감 조작
+    if gameState == "bestiary" then
+        if key == "escape" then
+            gameState = "town"
+            return
+        end
+        local totalRaces = 0
+        for _ in pairs(RACE_DB) do totalRaces = totalRaces + 1 end
+        if key == "up" or key == "w" then
+            bestiaryScroll = math.max(0, bestiaryScroll - 1)
+        elseif key == "down" or key == "s" then
+            bestiaryScroll = math.min(math.max(0, totalRaces - 4), bestiaryScroll + 1)
         end
         return
     end
@@ -1133,6 +1287,9 @@ function love.mousepressed(x, y, button)
                         gameState = "stash"
                         drag.item = nil
                         hoverItem = nil
+                    elseif label == "도감" then
+                        gameState = "bestiary"
+                        bestiaryScroll = 0
                     elseif label == "던전 출발" then
                         startDungeon()
                     elseif label == "저장" then
@@ -1346,6 +1503,14 @@ function love.wheelmoved(x, y)
         elseif y < 0 then
             messageScroll = math.max(0, messageScroll - 2)
         end
+    elseif gameState == "bestiary" then
+        local totalRaces = 0
+        for _ in pairs(RACE_DB) do totalRaces = totalRaces + 1 end
+        if y > 0 then
+            bestiaryScroll = math.max(0, bestiaryScroll - 1)
+        elseif y < 0 then
+            bestiaryScroll = math.min(math.max(0, totalRaces - 4), bestiaryScroll + 1)
+        end
     end
 end
 
@@ -1469,6 +1634,13 @@ local function drawGame()
     love.graphics.print("치명: " .. math.floor(getPlayerCritFull()) .. "%", hudX + 70, hudY)
     hudY = hudY + 14
 
+    -- 무기 속성 표시
+    local pElem = getPlayerElement()
+    local elemColor = Item.ELEMENT_COLORS[pElem] or {0.8, 0.8, 0.8}
+    love.graphics.setColor(elemColor[1], elemColor[2], elemColor[3])
+    love.graphics.print("속성: " .. (Item.ELEMENT_NAMES[pElem] or "물리"), hudX, hudY)
+    hudY = hudY + 14
+
     -- 패시브 효과 표시
     local passives = getEquipPassives()
     if #passives > 0 then
@@ -1500,6 +1672,28 @@ local function drawGame()
     hudY = hudY + 14
     love.graphics.print(">: 계단 | PgUp/Dn: 로그", hudX, hudY)
     hudY = hudY + 18
+
+    -- 인접 적 정보
+    for _, enemy in ipairs(enemies) do
+        if enemy.alive and distance(player.x, player.y, enemy.x, enemy.y) <= 2 then
+            local rd = RACE_DB[enemy.race]
+            local raceName = rd and rd.name or "???"
+            local raceCol = rd and rd.color or {0.8, 0.8, 0.8}
+            love.graphics.setColor(raceCol[1], raceCol[2], raceCol[3])
+            love.graphics.print("▶ " .. enemy.name .. " [" .. raceName .. "]", hudX, hudY)
+            hudY = hudY + 14
+            -- HP바
+            local hpRatio = enemy.hp / enemy.maxHp
+            love.graphics.setColor(0.3, 0.3, 0.3)
+            love.graphics.rectangle("fill", hudX, hudY, 100, 6)
+            love.graphics.setColor(1 - hpRatio, hpRatio, 0)
+            love.graphics.rectangle("fill", hudX, hudY, 100 * hpRatio, 6)
+            love.graphics.setColor(0.7, 0.7, 0.7)
+            love.graphics.print(enemy.hp .. "/" .. enemy.maxHp, hudX + 105, hudY - 3)
+            hudY = hudY + 14
+            break
+        end
+    end
 
     -- 메시지 로그
     love.graphics.setColor(COLOR_GOLD)
@@ -1835,9 +2029,118 @@ local function drawLevelUp()
     end
 end
 
+-- 속성 한글/색상 참조 (item.lua)
+local ELEMENT_LIST = {"slash", "pierce", "strike", "fire", "ice", "lightning", "poison", "holy"}
+local ELEMENT_NAMES = Item.ELEMENT_NAMES
+local ELEMENT_COLORS = Item.ELEMENT_COLORS
+
+local function drawBestiary()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+
+    love.graphics.setColor(0.06, 0.06, 0.1)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.printf("= 도감 (종족/속성) =", 0, 15, sw, "center")
+
+    love.graphics.setColor(COLOR_GRAY)
+    love.graphics.printf("↑↓/마우스 휠: 스크롤 | ESC: 돌아가기", 0, sh - 25, sw, "center")
+
+    -- 종족 목록 정렬 (일관된 순서)
+    local raceOrder = {"human", "beast", "goblinoid", "orc", "troll", "undead", "demon", "dragon", "construct", "insect", "reptile", "elf"}
+    local cardH = 130
+    local cardW = sw - 60
+    local startY = 50
+    local visibleCards = math.floor((sh - 90) / (cardH + 8))
+
+    for idx, raceKey in ipairs(raceOrder) do
+        local raceData = RACE_DB[raceKey]
+        if raceData then
+            local cardIdx = idx - bestiaryScroll
+            if cardIdx >= 1 and cardIdx <= visibleCards then
+                local cy = startY + (cardIdx - 1) * (cardH + 8)
+                local cx = 30
+
+                -- 카드 배경
+                love.graphics.setColor(0.12, 0.12, 0.18, 0.9)
+                love.graphics.rectangle("fill", cx, cy, cardW, cardH, 6, 6)
+                love.graphics.setColor(raceData.color[1], raceData.color[2], raceData.color[3], 0.7)
+                love.graphics.rectangle("line", cx, cy, cardW, cardH, 6, 6)
+
+                -- 종족명
+                love.graphics.setColor(raceData.color[1], raceData.color[2], raceData.color[3])
+                love.graphics.print("【" .. raceData.name .. "】", cx + 10, cy + 6)
+
+                -- 설명
+                love.graphics.setColor(0.8, 0.8, 0.8)
+                love.graphics.printf(raceData.desc, cx + 10, cy + 24, cardW - 20, "left")
+
+                -- 해당 종족의 몬스터들
+                local monsters = {}
+                for _, m in ipairs(ENEMY_DB) do
+                    if m.race == raceKey then
+                        table.insert(monsters, m.name)
+                    end
+                end
+                love.graphics.setColor(0.6, 0.7, 0.8)
+                love.graphics.print("몬스터: " .. table.concat(monsters, ", "), cx + 10, cy + 46)
+
+                -- 저항 표시
+                local ry = cy + 66
+                love.graphics.setColor(0.3, 0.7, 1)
+                love.graphics.print("저항:", cx + 10, ry)
+                local rx = cx + 50
+                if next(raceData.resist) then
+                    for elem, val in pairs(raceData.resist) do
+                        local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                        love.graphics.setColor(ec[1], ec[2], ec[3])
+                        local label = (ELEMENT_NAMES[elem] or elem)
+                        if val >= 1.0 then
+                            label = label .. "(면역)"
+                        else
+                            label = label .. "(-" .. math.floor(val * 100) .. "%)"
+                        end
+                        love.graphics.print(label, rx, ry)
+                        rx = rx + font:getWidth(label) + 12
+                    end
+                else
+                    love.graphics.setColor(COLOR_GRAY)
+                    love.graphics.print("없음", rx, ry)
+                end
+
+                -- 약점 표시
+                local wy = cy + 86
+                love.graphics.setColor(1, 0.4, 0.3)
+                love.graphics.print("약점:", cx + 10, wy)
+                local wx = cx + 50
+                if next(raceData.weak) then
+                    for elem, val in pairs(raceData.weak) do
+                        local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
+                        love.graphics.setColor(ec[1], ec[2], ec[3])
+                        local label = (ELEMENT_NAMES[elem] or elem) .. "(+" .. math.floor(val * 100) .. "%)"
+                        love.graphics.print(label, wx, wy)
+                        wx = wx + font:getWidth(label) + 12
+                    end
+                else
+                    love.graphics.setColor(COLOR_GRAY)
+                    love.graphics.print("없음", wx, wy)
+                end
+
+                -- 속성 범례 줄 (하단)
+                local ly = cy + 108
+                love.graphics.setColor(0.5, 0.5, 0.5, 0.6)
+                love.graphics.line(cx + 10, ly, cx + cardW - 10, ly)
+            end
+        end
+    end
+end
+
 function love.draw()
     if gameState == "town" then
         drawTown()
+    elseif gameState == "bestiary" then
+        drawBestiary()
     elseif gameState == "shop" then
         drawShop()
     elseif gameState == "stash" then
