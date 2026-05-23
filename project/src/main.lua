@@ -43,13 +43,13 @@ local turn = 0
 local floor = 1
 local camera = {x = 0, y = 0}
 local font = nil
+local messageScroll = 0
+local MAX_VISIBLE_MESSAGES = 8
 
 -- ===== 유틸리티 =====
 local function addMessage(text)
     table.insert(messages, 1, text)
-    if #messages > 6 then
-        table.remove(messages, 7)
-    end
+    messageScroll = 0
 end
 
 local function distance(x1, y1, x2, y2)
@@ -424,6 +424,18 @@ function love.keypressed(key)
         -- 대기 (턴 넘기기)
         turn = turn + 1
         moveEnemies()
+    elseif key == "pageup" then
+        messageScroll = math.min(messageScroll + 3, math.max(0, #messages - MAX_VISIBLE_MESSAGES))
+    elseif key == "pagedown" then
+        messageScroll = math.max(0, messageScroll - 3)
+    end
+end
+
+function love.wheelmoved(x, y)
+    if y > 0 then
+        messageScroll = math.min(messageScroll + 2, math.max(0, #messages - MAX_VISIBLE_MESSAGES))
+    elseif y < 0 then
+        messageScroll = math.max(0, messageScroll - 2)
     end
 end
 
@@ -529,18 +541,35 @@ function love.draw()
     love.graphics.print("Space: 턴 대기", hudX, hudY)
     hudY = hudY + 16
     love.graphics.print(">: 계단 (밟으면 이동)", hudX, hudY)
+    hudY = hudY + 16
+    love.graphics.print("PgUp/PgDn/휠: 로그", hudX, hudY)
     hudY = hudY + 30
 
     -- 메시지 로그
     love.graphics.setColor(COLOR_GOLD)
-    love.graphics.print("--- 메시지 ---", hudX, hudY)
+    local scrollInfo = ""
+    if #messages > MAX_VISIBLE_MESSAGES then
+        scrollInfo = " (" .. (messageScroll + 1) .. "-" .. math.min(messageScroll + MAX_VISIBLE_MESSAGES, #messages) .. "/" .. #messages .. ")"
+    end
+    love.graphics.print("--- 메시지 ---" .. scrollInfo, hudX, hudY)
     hudY = hudY + 20
 
-    for i, msg in ipairs(messages) do
-        local alpha = 1 - (i - 1) * 0.15
+    if messageScroll > 0 then
+        love.graphics.setColor(COLOR_GOLD)
+        love.graphics.print("  ▲ PgUp / 휠↑", hudX, hudY - 4)
+    end
+
+    for i = 1 + messageScroll, math.min(#messages, MAX_VISIBLE_MESSAGES + messageScroll) do
+        local msg = messages[i]
+        local alpha = 1 - (i - 1 - messageScroll) * 0.1
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.print(msg, hudX, hudY)
         hudY = hudY + 16
+    end
+
+    if messageScroll + MAX_VISIBLE_MESSAGES < #messages then
+        love.graphics.setColor(COLOR_GRAY)
+        love.graphics.print("  ▼ PgDn / 휠↓", hudX, hudY)
     end
 
     -- 게임오버 / 승리 화면
