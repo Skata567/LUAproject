@@ -80,6 +80,7 @@ function Item.new(data)
     self.count = data.count or 1
     self.color = data.color or {0.8, 0.8, 0.8}
     self.passive = data.passive or nil  -- {type="lifesteal", value=10, desc="..."}
+    self.element = data.element or "physical"  -- 공격 속성: physical/slash/pierce/strike/fire/ice/lightning/poison/holy
     return self
 end
 
@@ -100,6 +101,7 @@ function Item:clone()
         count = self.count,
         color = {self.color[1], self.color[2], self.color[3]},
         passive = nil,
+        element = self.element,
     }
     for k, v in pairs(self.stats) do
         data.stats[k] = v
@@ -133,6 +135,32 @@ function Item:getSlotName()
     return nil
 end
 
+-- 속성별 한글 이름
+Item.ELEMENT_NAMES = {
+    physical  = "물리",
+    slash     = "참격",
+    pierce    = "찌르기",
+    strike    = "타격",
+    fire      = "화염",
+    ice       = "빙결",
+    lightning = "번개",
+    poison    = "독",
+    holy      = "신성",
+}
+
+-- 속성별 색상
+Item.ELEMENT_COLORS = {
+    physical  = {0.8, 0.8, 0.8},
+    slash     = {0.9, 0.9, 0.9},
+    pierce    = {0.7, 0.7, 0.9},
+    strike    = {0.9, 0.7, 0.5},
+    fire      = {1.0, 0.4, 0.1},
+    ice       = {0.3, 0.7, 1.0},
+    lightning = {1.0, 1.0, 0.3},
+    poison    = {0.3, 0.9, 0.3},
+    holy      = {1.0, 1.0, 0.8},
+}
+
 --- 스탯 텍스트 생성
 function Item:getStatsText()
     local parts = {}
@@ -154,6 +182,10 @@ function Item:getStatsText()
     if self.twoHanded then
         table.insert(parts, "[양손]")
     end
+    if self.element and self.element ~= "physical" then
+        local eName = Item.ELEMENT_NAMES[self.element] or self.element
+        table.insert(parts, "[" .. eName .. "]")
+    end
     return table.concat(parts, "  ")
 end
 
@@ -174,41 +206,41 @@ Item.DATABASE = {
         id = "short_sword", name = "단검", description = "가벼운 한손 단검",
         gridW = 1, gridH = 3, rarity = "common", slot = "weapon",
         icon = "/", color = {0.8, 0.8, 0.8},
-        stats = {atk = 3},
+        stats = {atk = 3}, element = "slash",
     }),
     rusty_sword = Item.new({
         id = "rusty_sword", name = "녹슨 검", description = "낡은 녹슨 검",
         gridW = 1, gridH = 3, rarity = "common", slot = "weapon",
         icon = "/", color = {0.6, 0.4, 0.3},
-        stats = {atk = 2},
+        stats = {atk = 2}, element = "slash",
     }),
     -- 고급 (uncommon)
     dagger = Item.new({
         id = "dagger", name = "비수", description = "빠른 한손 비수",
         gridW = 1, gridH = 2, rarity = "uncommon", slot = "weapon",
         icon = "-", color = {0.7, 0.9, 0.7},
-        stats = {atk = 4, crit = 8, spd = 2},
+        stats = {atk = 4, crit = 8, spd = 2}, element = "pierce",
         passive = {type = "crit_boost", value = 5, desc = "치명타 +5%"},
     }),
     steel_sword = Item.new({
         id = "steel_sword", name = "강철 검", description = "잘 벼려진 강철 검",
         gridW = 1, gridH = 3, rarity = "uncommon", slot = "weapon",
         icon = "/", color = {0.7, 0.7, 0.9},
-        stats = {atk = 6, crit = 3},
+        stats = {atk = 6, crit = 3}, element = "slash",
     }),
     -- 희귀 (rare)
     flame_dagger = Item.new({
         id = "flame_dagger", name = "화염 단검", description = "불꽃이 깃든 단검",
         gridW = 1, gridH = 2, rarity = "rare", slot = "weapon",
         icon = "-", color = {1.0, 0.4, 0.1},
-        stats = {atk = 8, crit = 10},
+        stats = {atk = 8, crit = 10}, element = "fire",
         passive = {type = "burn", value = 3, desc = "공격 시 30% 확률로 3턴간 화상 (턴당 2뎀)"},
     }),
     venom_blade = Item.new({
         id = "venom_blade", name = "독날 검", description = "독이 묻은 검",
         gridW = 1, gridH = 3, rarity = "rare", slot = "weapon",
         icon = "/", color = {0.3, 0.9, 0.3},
-        stats = {atk = 7, spd = 1},
+        stats = {atk = 7, spd = 1}, element = "poison",
         passive = {type = "poison", value = 3, desc = "공격 시 25% 확률로 3턴간 독 (턴당 3뎀)"},
     }),
     -- 영웅 (epic)
@@ -216,14 +248,14 @@ Item.DATABASE = {
         id = "vampiric_blade", name = "흡혈검", description = "피를 빨아들이는 저주받은 검",
         gridW = 1, gridH = 3, rarity = "epic", slot = "weapon",
         icon = "/", color = {0.8, 0.1, 0.2},
-        stats = {atk = 12, crit = 8},
+        stats = {atk = 12, crit = 8}, element = "slash",
         passive = {type = "lifesteal", value = 15, desc = "공격 데미지의 15% HP 흡수"},
     }),
     thunder_sword = Item.new({
         id = "thunder_sword", name = "뇌전검", description = "번개가 깃든 검",
         gridW = 1, gridH = 3, rarity = "epic", slot = "weapon",
         icon = "/", color = {0.9, 0.9, 0.3},
-        stats = {atk = 14, spd = 3, crit = 12},
+        stats = {atk = 14, spd = 3, crit = 12}, element = "lightning",
         passive = {type = "stun", value = 15, desc = "공격 시 15% 확률로 적 1턴 기절"},
     }),
     -- 전설 (legendary)
@@ -231,8 +263,21 @@ Item.DATABASE = {
         id = "soul_reaper", name = "영혼 수확자", description = "영혼을 거두는 낫 형태의 검",
         gridW = 1, gridH = 4, rarity = "legendary", slot = "weapon",
         icon = ")", color = {0.6, 0.1, 0.8},
-        stats = {atk = 22, crit = 18, spd = 2},
+        stats = {atk = 22, crit = 18, spd = 2}, element = "holy",
         passive = {type = "lifesteal", value = 25, desc = "공격 데미지의 25% HP 흡수"},
+    }),
+    holy_mace = Item.new({
+        id = "holy_mace", name = "성스러운 메이스", description = "신성한 힘이 깃든 둔기",
+        gridW = 1, gridH = 3, rarity = "rare", slot = "weapon",
+        icon = "!", color = {1.0, 1.0, 0.7},
+        stats = {atk = 9, hp = 5}, element = "holy",
+    }),
+    ice_stiletto = Item.new({
+        id = "ice_stiletto", name = "얼음 단도", description = "얼어붙은 날의 단도",
+        gridW = 1, gridH = 2, rarity = "rare", slot = "weapon",
+        icon = "-", color = {0.4, 0.8, 1.0},
+        stats = {atk = 7, crit = 12, spd = 3}, element = "ice",
+        passive = {type = "stun", value = 10, desc = "공격 시 10% 확률로 적 1턴 빙결"},
     }),
 
     -- =============================================
@@ -244,7 +289,14 @@ Item.DATABASE = {
         gridW = 1, gridH = 4, rarity = "uncommon", slot = "weapon",
         twoHanded = true,
         icon = "|", color = {0.6, 0.8, 1.0},
-        stats = {atk = 7, crit = 5},
+        stats = {atk = 7, crit = 5}, element = "slash",
+    }),
+    war_hammer = Item.new({
+        id = "war_hammer", name = "전쟁 망치", description = "무거운 양손 망치",
+        gridW = 2, gridH = 3, rarity = "uncommon", slot = "weapon",
+        twoHanded = true,
+        icon = "m", color = {0.6, 0.5, 0.4},
+        stats = {atk = 8}, element = "strike",
     }),
     -- 희귀
     battle_axe = Item.new({
@@ -252,7 +304,7 @@ Item.DATABASE = {
         gridW = 2, gridH = 3, rarity = "rare", slot = "weapon",
         twoHanded = true,
         icon = "P", color = {0.9, 0.5, 0.2},
-        stats = {atk = 12, crit = 10},
+        stats = {atk = 12, crit = 10}, element = "slash",
         passive = {type = "armor_break", value = 30, desc = "적 방어력 30% 무시"},
     }),
     frost_halberd = Item.new({
@@ -260,7 +312,7 @@ Item.DATABASE = {
         gridW = 2, gridH = 4, rarity = "rare", slot = "weapon",
         twoHanded = true,
         icon = "T", color = {0.3, 0.7, 1.0},
-        stats = {atk = 14, def = 3},
+        stats = {atk = 14, def = 3}, element = "ice",
         passive = {type = "stun", value = 20, desc = "공격 시 20% 확률로 적 1턴 기절"},
     }),
     -- 영웅
@@ -269,7 +321,7 @@ Item.DATABASE = {
         gridW = 2, gridH = 4, rarity = "epic", slot = "weapon",
         twoHanded = true,
         icon = "†", color = {1.0, 0.3, 0.0},
-        stats = {atk = 20, crit = 12},
+        stats = {atk = 20, crit = 12}, element = "fire",
         passive = {type = "burn", value = 5, desc = "공격 시 40% 확률로 5턴간 화상 (턴당 3뎀)"},
     }),
     -- 전설
@@ -278,7 +330,7 @@ Item.DATABASE = {
         gridW = 2, gridH = 5, rarity = "legendary", slot = "weapon",
         twoHanded = true,
         icon = "†", color = {1.0, 0.4, 0.1},
-        stats = {atk = 28, crit = 18},
+        stats = {atk = 28, crit = 18}, element = "fire",
         passive = {type = "double_hit", value = 25, desc = "25% 확률로 연속 공격"},
     }),
     abyssal_scythe = Item.new({
@@ -286,7 +338,7 @@ Item.DATABASE = {
         gridW = 2, gridH = 5, rarity = "legendary", slot = "weapon",
         twoHanded = true,
         icon = "}", color = {0.4, 0.0, 0.6},
-        stats = {atk = 25, crit = 20, spd = 3},
+        stats = {atk = 25, crit = 20, spd = 3}, element = "slash",
         passive = {type = "lifesteal", value = 20, desc = "공격 데미지의 20% HP 흡수"},
     }),
 
