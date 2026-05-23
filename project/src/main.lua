@@ -13,8 +13,11 @@ local MAP_HEIGHT = 35
 local MAX_ROOMS = 10
 local MIN_ROOM_SIZE = 4
 local MAX_ROOM_SIZE = 10
-local MAX_ENEMIES_PER_ROOM = 3
+local MAX_ENEMIES_PER_ROOM = 4
 local MAX_ITEMS_PER_ROOM = 2
+
+-- 스탯 포인트 배분 상태
+local statAlloc = nil   -- {points=N, sel=1}  레벨업 시 활성화
 
 -- 타일 종류
 local TILE_WALL = 0
@@ -34,7 +37,7 @@ local COLOR_GRAY     = {0.5, 0.5, 0.5}
 local COLOR_GOLD     = {1, 0.85, 0}
 
 -- 게임 상태
-local gameState = "playing" -- playing, inventory, town, shop, gameover
+local gameState = "playing" -- playing, inventory, town, shop, stash, gameover, levelup
 local map = {}
 local rooms = {}
 local player = {}
@@ -200,14 +203,52 @@ local function createMap()
     end
 end
 
+-- ===== 몬스터 데이터베이스 (DCSS 스타일) =====
+local ENEMY_DB = {
+    -- 1층: 약한 적
+    {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}},
+    {name="고블린",      char="g", hp=6,  atk=2, def=0, spd=1.0, exp=6,  ev=10, color={0,0.8,0},     floors={1,2,3}},
+    {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}},
+    {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}},
+    {name="좀비",        char="z", hp=10, atk=2, def=2, spd=0.5, exp=8,  ev=0,  color={0.3,0.5,0.2}, floors={1,2,3}},
+    -- 2층: 중간 적
+    {name="오크",        char="o", hp=12, atk=4, def=2, spd=1.0, exp=12, ev=8,  color={0.5,0.8,0.2}, floors={2,3,4}},
+    {name="스켈레톤",    char="s", hp=8,  atk=3, def=4, spd=0.8, exp=10, ev=5,  color={0.9,0.9,0.8}, floors={2,3}},
+    {name="독거미",      char="S", hp=7,  atk=3, def=0, spd=1.3, exp=10, ev=18, color={0.2,0.7,0.2}, floors={2,3}},
+    {name="늑대",        char="w", hp=9,  atk=4, def=1, spd=1.4, exp=10, ev=15, color={0.5,0.5,0.5}, floors={2,3}},
+    {name="오크전사",    char="O", hp=18, atk=5, def=3, spd=0.9, exp=18, ev=8,  color={0.5,0.6,0.2}, floors={2,3,4}},
+    -- 3층: 강한 적
+    {name="트롤",        char="T", hp=25, atk=7, def=3, spd=0.7, exp=25, ev=5,  color={0.3,0.6,0.3}, floors={3,4}},
+    {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}},
+    {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}},
+    {name="미노타우로스",char="M", hp=30, atk=8, def=4, spd=1.0, exp=30, ev=6,  color={0.6,0.3,0.1}, floors={3,4,5}},
+    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}},
+    -- 4층: 엘리트
+    {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}},
+    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}},
+    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}},
+    {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}},
+    {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}},
+    -- 5층: 보스급
+    {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}},
+    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}},
+    {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}},
+    {name="악마",        char="&", hp=50, atk=16,def=6, spd=1.2, exp=90, ev=18, color={0.8,0.1,0.1}, floors={5}},
+    {name="고대용",      char="@", hp=100,atk=20,def=10,spd=0.9, exp=150,ev=8,  color={1.0,0.8,0.0}, floors={5}},
+}
+
 -- ===== 적 생성 =====
 local function spawnEnemies()
-    local enemyTypes = {
-        {name = "고블린",  char = "g", hp = 3,  atk = 1, exp = 5,  color = {0, 0.8, 0}},
-        {name = "오크",    char = "o", hp = 6,  atk = 2, exp = 10, color = {0.5, 0.8, 0.2}},
-        {name = "트롤",    char = "T", hp = 10, atk = 3, exp = 20, color = {0.3, 0.6, 0.3}},
-        {name = "드래곤",  char = "D", hp = 20, atk = 5, exp = 50, color = {1, 0.2, 0}},
-    }
+    local available = {}
+    for _, e in ipairs(ENEMY_DB) do
+        for _, f in ipairs(e.floors) do
+            if f == floor then
+                table.insert(available, e)
+                break
+            end
+        end
+    end
+    if #available == 0 then return end
 
     for i = 2, #rooms do
         local room = rooms[i]
@@ -216,23 +257,27 @@ local function spawnEnemies()
             local ex = math.random(room.x + 1, room.x + room.w - 2)
             local ey = math.random(room.y + 1, room.y + room.h - 2)
 
-            local maxType = math.min(#enemyTypes, floor + 1)
-            local typeIdx = math.random(1, maxType)
-            local etype = enemyTypes[typeIdx]
+            local etype = available[math.random(1, #available)]
 
-            local hpBonus = (floor - 1) * 2
-            local atkBonus = math.floor((floor - 1) / 2)
+            -- 층별 스케일링
+            local scale = 1 + (floor - 1) * 0.15
+            local hpVal  = math.floor(etype.hp * scale)
+            local atkVal = math.floor(etype.atk * scale)
+            local defVal = math.floor(etype.def * scale)
 
             table.insert(enemies, {
                 x = ex, y = ey,
                 name = etype.name,
                 char = etype.char,
-                hp = etype.hp + hpBonus,
-                maxHp = etype.hp + hpBonus,
-                atk = etype.atk + atkBonus,
-                exp = etype.exp,
+                hp = hpVal,
+                maxHp = hpVal,
+                atk = atkVal,
+                def = defVal,
+                ev = etype.ev,
+                spd = etype.spd or 1.0,
+                exp = math.floor(etype.exp * scale),
                 color = etype.color,
-                alive = true
+                alive = true,
             })
         end
     end
@@ -279,6 +324,12 @@ local function initPlayer(keepStats)
             nextExp = 20,
             level = 1,
             gold = 0,
+            -- DCSS 스타일 스탯
+            str = 5,   -- 힘: 근접 데미지, 무거운 장비
+            dex = 5,   -- 민첩: 명중률, 회피, 치명타
+            int = 5,   -- 지능: 마법 데미지 (향후 확장)
+            con = 5,   -- 체력: 최대 HP, HP 재생
+            lck = 5,   -- 운: 치명타, 드롭률, 회피
         }
     end
 end
@@ -286,12 +337,43 @@ end
 --- 장비 스탯 포함 최종 스탯 계산
 local function getPlayerAtk()
     local bonus = equip and equip:getTotalStats().atk or 0
-    return player.baseAtk + bonus
+    local strBonus = math.floor(player.str / 3)
+    return player.baseAtk + bonus + strBonus
 end
 
 local function getPlayerDef()
     local bonus = equip and equip:getTotalStats().def or 0
-    return player.baseDef + bonus
+    local conBonus = math.floor(player.con / 5)
+    return player.baseDef + bonus + conBonus
+end
+
+--- 회피율 (DEX + LCK 기반)
+local function getPlayerEvasion()
+    local eqSpd = equip and equip:getTotalStats().spd or 0
+    return 5 + player.dex * 1.5 + player.lck * 0.5 + eqSpd
+end
+
+--- 명중률 (DEX 기반)
+local function getPlayerAccuracy()
+    return 70 + player.dex * 2 + player.lck * 0.5
+end
+
+--- 치명타 확률 (DEX + LCK 기반)
+local function getPlayerCritChance()
+    local eqCrit = equip and equip:getTotalStats().crit or 0
+    return 5 + player.dex * 0.5 + player.lck * 1.0 + eqCrit
+end
+
+--- 치명타 배율
+local function getPlayerCritMult()
+    return 1.5 + player.str * 0.02
+end
+
+--- 최대 HP (CON 기반)
+local function getPlayerMaxHp()
+    local eqHp = equip and equip:getTotalStats().hp or 0
+    local base = 30 + (player.level - 1) * 5
+    return base + player.con * 3 + eqHp
 end
 
 -- ===== 레벨업 =====
@@ -299,28 +381,62 @@ local function checkLevelUp()
     while player.exp >= player.nextExp do
         player.exp = player.exp - player.nextExp
         player.level = player.level + 1
-        player.maxHp = player.maxHp + 5
-        player.hp = player.maxHp
         player.baseAtk = player.baseAtk + 1
         player.nextExp = math.floor(player.nextExp * 1.5)
-        addMessage("** 레벨 업! Lv." .. player.level .. " **")
+
+        -- 스탯 포인트 3점 배분
+        statAlloc = {points = 3, sel = 1}
+        gameState = "levelup"
+
+        -- maxHp 재계산 + 풀HP
+        player.maxHp = getPlayerMaxHp()
+        player.hp = player.maxHp
+
+        addMessage("** 레벨 업! Lv." .. player.level .. " — 스탯 포인트 3점을 배분하세요! **")
     end
 end
 
--- ===== 전투 =====
+-- ===== 전투 (DCSS 스타일 공식) =====
 local function attackEnemy(enemy)
+    local accuracy = getPlayerAccuracy()
+    local hitRoll = math.random(1, 100)
+    local evade = enemy.ev or 0
+
+    -- 명중 판정: accuracy - evasion vs roll
+    if hitRoll > accuracy - evade then
+        addMessage(enemy.name .. "이(가) 공격을 회피했다!")
+        return
+    end
+
     local atk = getPlayerAtk()
-    local dmg = math.max(1, atk - math.floor(math.random() * 2))
+    local dmgReduction = math.floor((enemy.def or 0) * 0.6)
+    local baseDmg = math.max(1, atk - dmgReduction)
+
+    -- 데미지 변동 (±20%)
+    local variance = math.floor(baseDmg * 0.2)
+    local dmg = baseDmg + math.random(-variance, variance)
+
+    -- 치명타 판정
+    local critChance = getPlayerCritChance()
+    local isCrit = math.random(1, 100) <= critChance
+    if isCrit then
+        dmg = math.floor(dmg * getPlayerCritMult())
+    end
+    dmg = math.max(1, dmg)
+
     enemy.hp = enemy.hp - dmg
-    addMessage(enemy.name .. "에게 " .. dmg .. " 데미지!")
+    local msg = enemy.name .. "에게 " .. dmg .. " 데미지!"
+    if isCrit then msg = "★ 치명타! " .. msg end
+    addMessage(msg)
 
     if enemy.hp <= 0 then
         enemy.alive = false
         player.exp = player.exp + enemy.exp
         addMessage(enemy.name .. " 처치! (+" .. enemy.exp .. " 경험치)")
 
-        -- 적 처치 시 아이템 드롭 (50% 확률)
-        if math.random() < 0.5 then
+        -- 적 처치 시 아이템 드롭 (40% + LCK 보정)
+        local dropChance = 0.4 + player.lck * 0.01
+        if math.random() < dropChance then
             local drop = rollDrop()
             if drop then
                 table.insert(groundItems, {
@@ -332,13 +448,33 @@ local function attackEnemy(enemy)
             end
         end
 
+        -- 골드 드롭
+        local goldDrop = math.random(1, 5) + floor * 2
+        player.gold = player.gold + goldDrop
+        addMessage("  → " .. goldDrop .. "G 획득!")
+
         checkLevelUp()
     end
 end
 
 local function enemyAttack(enemy)
+    local evasion = getPlayerEvasion()
+    local hitRoll = math.random(1, 100)
+    local enemyAcc = 60 + (enemy.atk or 0) * 2
+
+    -- 회피 판정
+    if hitRoll > enemyAcc - evasion then
+        addMessage(enemy.name .. "의 공격을 회피했다!")
+        return
+    end
+
     local def = getPlayerDef()
-    local dmg = math.max(1, enemy.atk - def)
+    local dmg = math.max(1, (enemy.atk or 0) - math.floor(def * 0.6))
+    -- 데미지 변동
+    local variance = math.floor(dmg * 0.15)
+    dmg = dmg + math.random(-variance, variance)
+    dmg = math.max(1, dmg)
+
     player.hp = player.hp - dmg
     addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
 
@@ -367,6 +503,7 @@ local function goToTown()
     gameState = "town"
     townMenuSel = 1
     dungeonRun = dungeonRun + 1
+    player.maxHp = getPlayerMaxHp()
     player.hp = player.maxHp
     shop.needsRefresh = true
     addMessage("** 마을에 도착했습니다! (HP 회복) **")
@@ -382,6 +519,7 @@ local function startDungeon()
     spawnEnemies()
     spawnGroundItems()
     initPlayer(true)
+    player.maxHp = getPlayerMaxHp()
     player.hp = player.maxHp
 end
 
@@ -473,7 +611,7 @@ end
 -- ===== LÖVE2D 콜백 =====
 function love.load()
     love.window.setTitle("Extraction Roguelike")
-    love.window.setMode(MAP_WIDTH * TILE_SIZE + 250, MAP_HEIGHT * TILE_SIZE + 10, {resizable = false})
+    love.window.setMode(MAP_WIDTH * TILE_SIZE + 270, MAP_HEIGHT * TILE_SIZE + 10, {resizable = false})
 
     font = love.graphics.newFont("NanumGothicCoding.ttf", 13)
     love.graphics.setFont(font)
@@ -496,6 +634,8 @@ function love.load()
     addMessage("던전 출발을 선택하여 탐험을 시작하세요!")
 
     initPlayer()
+    player.maxHp = getPlayerMaxHp()
+    player.hp = player.maxHp
 
     -- 시작 아이템
     local starter = Item.create("short_sword")
@@ -602,6 +742,34 @@ function love.keypressed(key)
             -- 사망 시 마을로 귀환, 인벤토리 유지 (익스트랙션 스타일)
             addMessage("** 사망했지만 마을로 돌아왔습니다... **")
             goToTown()
+        end
+        return
+    end
+
+    -- 레벨업 스탯 배분
+    if gameState == "levelup" and statAlloc then
+        local STAT_KEYS = {"str", "dex", "int", "con", "lck"}
+        if key == "up" or key == "w" then
+            statAlloc.sel = statAlloc.sel - 1
+            if statAlloc.sel < 1 then statAlloc.sel = #STAT_KEYS end
+        elseif key == "down" or key == "s" then
+            statAlloc.sel = statAlloc.sel + 1
+            if statAlloc.sel > #STAT_KEYS then statAlloc.sel = 1 end
+        elseif key == "return" or key == "space" then
+            local stat = STAT_KEYS[statAlloc.sel]
+            player[stat] = player[stat] + 1
+            statAlloc.points = statAlloc.points - 1
+            addMessage(stat:upper() .. " +1! (현재 " .. player[stat] .. ")")
+
+            -- maxHp 재계산
+            player.maxHp = getPlayerMaxHp()
+            player.hp = math.min(player.hp, player.maxHp)
+
+            if statAlloc.points <= 0 then
+                statAlloc = nil
+                gameState = "playing"
+                addMessage("스탯 배분 완료!")
+            end
         end
         return
     end
@@ -1063,23 +1231,43 @@ local function drawGame()
     love.graphics.print("경험치: " .. player.exp .. "/" .. player.nextExp, hudX + 5, hudY - 1)
     hudY = hudY + 18
 
-    -- 스탯 (장비 보너스 포함)
-    local eqStats = equip:getTotalStats()
-    love.graphics.setColor(1, 0.4, 0.4)
-    local atkText = "공격력: " .. player.baseAtk
-    if eqStats.atk > 0 then atkText = atkText .. " +" .. eqStats.atk end
-    love.graphics.print(atkText, hudX, hudY)
+    -- 스탯 (DCSS 스타일)
+    love.graphics.setColor(COLOR_GOLD)
+    love.graphics.print("--- 스탯 ---", hudX, hudY)
     hudY = hudY + 16
 
+    love.graphics.setColor(1, 0.4, 0.4)
+    love.graphics.print("힘(STR):  " .. player.str, hudX, hudY)
+    hudY = hudY + 14
+    love.graphics.setColor(0.4, 1, 0.4)
+    love.graphics.print("민첩(DEX): " .. player.dex, hudX, hudY)
+    hudY = hudY + 14
     love.graphics.setColor(0.4, 0.6, 1)
-    local defText = "방어력: " .. player.baseDef
-    if eqStats.def > 0 then defText = defText .. " +" .. eqStats.def end
-    love.graphics.print(defText, hudX, hudY)
-    hudY = hudY + 16
+    love.graphics.print("지능(INT): " .. player.int, hudX, hudY)
+    hudY = hudY + 14
+    love.graphics.setColor(1, 0.7, 0.3)
+    love.graphics.print("체력(CON): " .. player.con, hudX, hudY)
+    hudY = hudY + 14
+    love.graphics.setColor(1, 1, 0.4)
+    love.graphics.print("운(LCK):  " .. player.lck, hudX, hudY)
+    hudY = hudY + 18
+
+    -- 전투 스탯
+    local eqStats = equip:getTotalStats()
+    love.graphics.setColor(1, 0.4, 0.4)
+    love.graphics.print("공격: " .. getPlayerAtk(), hudX, hudY)
+    love.graphics.setColor(0.4, 0.6, 1)
+    love.graphics.print("방어: " .. getPlayerDef(), hudX + 70, hudY)
+    hudY = hudY + 14
+    love.graphics.setColor(0.4, 1, 0.4)
+    love.graphics.print("회피: " .. math.floor(getPlayerEvasion()) .. "%", hudX, hudY)
+    love.graphics.setColor(1, 0.8, 0.3)
+    love.graphics.print("치명: " .. math.floor(getPlayerCritChance()) .. "%", hudX + 70, hudY)
+    hudY = hudY + 14
 
     love.graphics.setColor(COLOR_GOLD)
     love.graphics.print("골드: " .. player.gold, hudX, hudY)
-    hudY = hudY + 22
+    hudY = hudY + 18
 
     -- 조작법
     love.graphics.setColor(COLOR_GRAY)
@@ -1087,16 +1275,12 @@ local function drawGame()
     hudY = hudY + 16
     love.graphics.print("방향키/WASD: 이동", hudX, hudY)
     hudY = hudY + 14
-    love.graphics.print("적에게 부딪히기: 공격", hudX, hudY)
-    hudY = hudY + 14
-    love.graphics.print("Space: 턴 대기", hudX, hudY)
+    love.graphics.print("부딪히기: 공격 | Space: 대기", hudX, hudY)
     hudY = hudY + 14
     love.graphics.print("I/Tab: 인벤토리", hudX, hudY)
     hudY = hudY + 14
-    love.graphics.print(">: 계단 (밟으면 이동)", hudX, hudY)
-    hudY = hudY + 14
-    love.graphics.print("PgUp/PgDn/휠: 로그", hudX, hudY)
-    hudY = hudY + 22
+    love.graphics.print(">: 계단 | PgUp/Dn: 로그", hudX, hudY)
+    hudY = hudY + 18
 
     -- 메시지 로그
     love.graphics.setColor(COLOR_GOLD)
@@ -1163,10 +1347,18 @@ local function drawInventory()
 
     -- 플레이어 현재 스탯
     love.graphics.setColor(COLOR_GOLD)
-    love.graphics.print("=== 전투 스탯 ===", equip.x - 80, equip.y + 250)
+    love.graphics.print("=== 전투 스탯 ===", equip.x - 80, equip.y + 230)
+    love.graphics.setColor(1, 0.4, 0.4)
+    love.graphics.print("공격: " .. getPlayerAtk(), equip.x - 76, equip.y + 248)
+    love.graphics.setColor(0.4, 0.6, 1)
+    love.graphics.print("방어: " .. getPlayerDef(), equip.x - 76, equip.y + 264)
+    love.graphics.setColor(0.4, 1, 0.4)
+    love.graphics.print("회피: " .. math.floor(getPlayerEvasion()) .. "%", equip.x - 76, equip.y + 280)
+    love.graphics.setColor(1, 0.8, 0.3)
+    love.graphics.print("치명: " .. math.floor(getPlayerCritChance()) .. "%", equip.x - 76, equip.y + 296)
     love.graphics.setColor(COLOR_WHITE)
-    love.graphics.print("공격력: " .. getPlayerAtk() .. " (기본 " .. player.baseAtk .. ")", equip.x - 76, equip.y + 270)
-    love.graphics.print("방어력: " .. getPlayerDef() .. " (기본 " .. player.baseDef .. ")", equip.x - 76, equip.y + 286)
+    love.graphics.print("STR:" .. player.str .. " DEX:" .. player.dex .. " INT:" .. player.int, equip.x - 76, equip.y + 316)
+    love.graphics.print("CON:" .. player.con .. " LCK:" .. player.lck, equip.x - 76, equip.y + 332)
 
     -- 타이틀
     love.graphics.setColor(COLOR_GOLD)
@@ -1360,6 +1552,56 @@ local function drawShop()
     love.graphics.printf("좌클릭: 드래그 (상점↔인벤) | 우클릭: 빠른 구매/판매 | Esc: 나가기", 0, sh - 25, sw, "center")
 end
 
+local function drawLevelUp()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+
+    -- 배경
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    local panelW = 300
+    local panelH = 280
+    local px = sw / 2 - panelW / 2
+    local py = sh / 2 - panelH / 2
+
+    love.graphics.setColor(0.1, 0.1, 0.15, 0.95)
+    love.graphics.rectangle("fill", px, py, panelW, panelH, 8, 8)
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.rectangle("line", px, py, panelW, panelH, 8, 8)
+
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.printf("레벨 업! Lv." .. player.level, px, py + 12, panelW, "center")
+
+    if statAlloc then
+        love.graphics.setColor(COLOR_WHITE)
+        love.graphics.printf("남은 포인트: " .. statAlloc.points, px, py + 35, panelW, "center")
+
+        local STAT_KEYS = {"str", "dex", "int", "con", "lck"}
+        local STAT_NAMES = {"힘 (STR)  — 근접 데미지", "민첩 (DEX) — 명중/회피/치명타", "지능 (INT) — 마법 (향후 확장)", "체력 (CON) — 최대 HP/방어", "운 (LCK)  — 치명타/드롭률"}
+        local STAT_COLORS = {{1,0.4,0.4},{0.4,1,0.4},{0.4,0.6,1},{1,0.7,0.3},{1,1,0.4}}
+
+        for i, stat in ipairs(STAT_KEYS) do
+            local sy = py + 60 + (i - 1) * 38
+
+            if i == statAlloc.sel then
+                love.graphics.setColor(0.3, 0.4, 0.3)
+                love.graphics.rectangle("fill", px + 15, sy - 2, panelW - 30, 34, 4, 4)
+                love.graphics.setColor(0.5, 0.8, 0.5)
+                love.graphics.rectangle("line", px + 15, sy - 2, panelW - 30, 34, 4, 4)
+            end
+
+            love.graphics.setColor(STAT_COLORS[i])
+            love.graphics.print(STAT_NAMES[i], px + 25, sy + 2)
+            love.graphics.setColor(COLOR_WHITE)
+            love.graphics.print("현재: " .. player[stat], px + 25, sy + 17)
+        end
+
+        love.graphics.setColor(COLOR_GRAY)
+        love.graphics.printf("↑↓: 선택 | Enter/Space: 배분", px, py + panelH - 25, panelW, "center")
+    end
+end
+
 function love.draw()
     if gameState == "town" then
         drawTown()
@@ -1367,6 +1609,9 @@ function love.draw()
         drawShop()
     elseif gameState == "stash" then
         drawStash()
+    elseif gameState == "levelup" then
+        drawGame()
+        drawLevelUp()
     else
         drawGame()
         if gameState == "inventory" then
