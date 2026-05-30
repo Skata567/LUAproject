@@ -4,14 +4,17 @@
         {
             "label": "Love2D: Run project",
             "type": "shell",
-            "command": "love .",
+            "command": "${workspaceFolder}\\love-11.5-win64\\lovec.exe",
+            "args": [
+                "${workspaceFolder}\\project\\src"
+            ],
             "group": "build",
             "problemMatcher": []
         },
         {
             "label": "Lua: Run current file",
             "type": "shell",
-            "command": "lua",
+            "command": "D:\\2021391007\\lua-5.1.5_Win64_bin\\lua5.1.exe",
             "args": [
                 "${file}"
             ],
