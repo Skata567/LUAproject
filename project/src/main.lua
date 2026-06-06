@@ -7,6 +7,7 @@ local Equipment = require("equipment")
 local Shop = require("shop")
 local FOV = require("fov")
 local SKILLS_DB = require("skills_db")
+local ConfigManager = require("config_manager")
 
 -- ===== 설정 =====
 local TILE_SIZE = 16
@@ -2649,24 +2650,136 @@ function love.update(dt)
     end
 end
 
+local function isKey(action, key)
+    if not CONFIG or not CONFIG.keys then return false end
+    return key == CONFIG.keys[action]
+end
+
+-- 설정용 전역 변수
+optionsMenuSel = 1
+local OPTIONS_MENU = {"오디오: BGM", "오디오: SFX", "조작: 위", "조작: 아래", "조작: 좌", "조작: 우", "조작: 대기", "조작: 상호작용", "조작: 인벤토리", "조작: 스킬트리", "타이틀로 돌아가기"}
+local waitingForKey = nil
+
 function love.keypressed(key)
+    -- 키 바인딩 대기 상태
+    if waitingForKey then
+        if key ~= "escape" then
+            local actionMap = {
+                ["조작: 위"] = "up",
+                ["조작: 아래"] = "down",
+                ["조작: 좌"] = "left",
+                ["조작: 우"] = "right",
+                ["조작: 대기"] = "wait",
+                ["조작: 상호작용"] = "interact",
+                ["조작: 인벤토리"] = "inventory",
+                ["조작: 스킬트리"] = "skilltree"
+            }
+            local action = actionMap[OPTIONS_MENU[optionsMenuSel]]
+            if action then
+                CONFIG.keys[action] = key
+                ConfigManager.save()
+            end
+        end
+        waitingForKey = nil
+        return
+    end
+
+    -- 환경 설정 화면
+    if gameState == "options" then
+        if key == "escape" then
+            gameState = "playing"
+            return
+        end
+        if isKey("up", key) or key == "up" then
+            optionsMenuSel = optionsMenuSel - 1
+            if optionsMenuSel < 1 then optionsMenuSel = #OPTIONS_MENU end
+        elseif isKey("down", key) or key == "down" then
+            optionsMenuSel = optionsMenuSel + 1
+            if optionsMenuSel > #OPTIONS_MENU then optionsMenuSel = 1 end
+        elseif isKey("left", key) or key == "left" then
+            local sel = OPTIONS_MENU[optionsMenuSel]
+            if sel == "오디오: BGM" then
+                CONFIG.audio.bgm = math.max(0, CONFIG.audio.bgm - 10)
+                ConfigManager.save()
+            elseif sel == "오디오: SFX" then
+                CONFIG.audio.sfx = math.max(0, CONFIG.audio.sfx - 10)
+                ConfigManager.save()
+            end
+        elseif isKey("right", key) or key == "right" then
+            local sel = OPTIONS_MENU[optionsMenuSel]
+            if sel == "오디오: BGM" then
+                CONFIG.audio.bgm = math.min(100, CONFIG.audio.bgm + 10)
+                ConfigManager.save()
+            elseif sel == "오디오: SFX" then
+                CONFIG.audio.sfx = math.min(100, CONFIG.audio.sfx + 10)
+                ConfigManager.save()
+            end
+        elseif isKey("interact", key) or key == "return" or key == "space" then
+            local sel = OPTIONS_MENU[optionsMenuSel]
+            if sel:find("조작:") then
+                waitingForKey = true
+            elseif sel == "타이틀로 돌아가기" then
+                gameState = "charselect"
+                charSelect.phase = "race"
+                player = nil
+            end
+        end
+        return
+    end
+
+    -- 옵션 토글
+    if key == "escape" or isKey("escape", key) then
+        if gameState == "playing" then
+            gameState = "options"
+            return
+        elseif gameState == "inventory" then
+            gameState = "playing"
+            drag.item = nil
+            hoverItem = nil
+            return
+        elseif gameState == "shop" then
+            if drag.item then
+                if drag.fromSlot == "shop" then
+                    shop:addItem(drag.item, drag.shopPrice)
+                else
+                    inv:autoPlace(drag.item)
+                end
+                drag.item = nil
+            end
+            gameState = "town"
+            hoverItem = nil
+            return
+        elseif gameState == "stash" then
+            gameState = "town"
+            drag.item = nil
+            hoverItem = nil
+            return
+        elseif gameState == "bestiary" then
+            gameState = "town"
+            return
+        elseif gameState == "skilltree" then
+            gameState = "playing"
+            return
+        end
+    end
+
     -- 캐릭터 선택 화면
     if gameState == "charselect" then
         if charSelect.phase == "race" then
-            if key == "up" or key == "w" then
+            if isKey("up", key) or key == "up" then
                 charSelect.raceSel = math.max(1, charSelect.raceSel - 1)
-            elseif key == "down" or key == "s" then
+            elseif isKey("down", key) or key == "down" then
                 charSelect.raceSel = math.min(#PLAYER_RACES, charSelect.raceSel + 1)
-            elseif key == "return" or key == "space" then
+            elseif isKey("interact", key) or key == "return" then
                 charSelect.chosenRace = PLAYER_RACES[charSelect.raceSel]
                 charSelect.phase = "class"
             end
         elseif charSelect.phase == "class" then
-            if key == "up" or key == "w" then
+            if isKey("up", key) or key == "up" then
                 charSelect.classSel = math.max(1, charSelect.classSel - 1)
-            elseif key == "down" or key == "s" then
+            elseif isKey("down", key) or key == "down" then
                 charSelect.classSel = math.min(#PLAYER_CLASSES, charSelect.classSel + 1)
-            elseif key == "return" or key == "space" then
+            elseif isKey("interact", key) or key == "return" then
                 local selectedClass = PLAYER_CLASSES[charSelect.classSel]
                 local ok, reason = isClassAllowedForRace(charSelect.chosenRace, selectedClass)
                 if not ok then
@@ -2675,7 +2788,7 @@ function love.keypressed(key)
                 end
                 charSelect.chosenClass = selectedClass
                 finishCharCreation()
-            elseif key == "escape" then
+            elseif isKey("escape", key) or key == "escape" then
                 charSelect.phase = "race"
             end
         end
@@ -2683,13 +2796,12 @@ function love.keypressed(key)
     end
 
     -- 스킬 핫키 — 게임 플레이 중
-    if gameState == "playing" and player.skills then
+    if gameState == "playing" and player and player.skills then
         local skillKey = tonumber(key)
         if skillKey and skillKey >= 1 and skillKey <= #player.skills then
             local selectedSkill = player.skills[skillKey]
             local target = nil
 
-            -- 공격 마법/스킬은 근처 적을 자동 타겟한다.
             if selectedSkill.type == "attack" then
                 local range = selectedSkill.range or 6
                 local bestDist = range + 1
@@ -2700,23 +2812,20 @@ function love.keypressed(key)
                         bestDist = dist
                     end
                 end
-            end
-
-            if selectedSkill.type == "attack" and not target then
-                addMessage("사거리 안에 대상이 없습니다.")
-                return
+                if not target then
+                    addMessage("사거리 안에 대상이 없습니다.")
+                    return
+                end
             end
 
             local used = useSkill(skillKey, target)
             if used then
-                -- 공격 스킬 사용 후 턴 소비
                 local s = selectedSkill
                 if s.type == "attack" or s.type == "heal" then
                     turn = turn + 1
                     processStatusEffects()
                     moveEnemies()
                 end
-                -- 적 처치 체크
                 if target and target.hp <= 0 and target.alive then
                     target.alive = false
                     gainExp(target.exp or 0)
@@ -2742,7 +2851,7 @@ function love.keypressed(key)
     end
 
     -- 스킬 트리 토글
-    if key == "k" then
+    if isKey("skilltree", key) then
         if gameState == "playing" then
             gameState = "skilltree"
             return
@@ -2753,7 +2862,7 @@ function love.keypressed(key)
     end
 
     -- 인벤토리 토글
-    if key == "i" or key == "tab" then
+    if isKey("inventory", key) then
         if gameState == "playing" then
             gameState = "inventory"
             drag.item = nil
@@ -2772,46 +2881,18 @@ function love.keypressed(key)
         return
     end
 
-    if key == "escape" then
-        if gameState == "inventory" then
-            gameState = "playing"
-            drag.item = nil
-            hoverItem = nil
-            return
-        elseif gameState == "shop" then
-            if drag.item then
-                if drag.fromSlot == "shop" then
-                    shop:addItem(drag.item, drag.shopPrice)
-                else
-                    inv:autoPlace(drag.item)
-                end
-                drag.item = nil
-            end
-            gameState = "town"
-            hoverItem = nil
-            return
-        elseif gameState == "stash" then
-            gameState = "town"
-            drag.item = nil
-            hoverItem = nil
-            return
-        end
-    end
-
     -- 마을 메뉴
     if gameState == "town" then
-        if key == "up" or key == "w" then
+        if isKey("up", key) or key == "up" then
             townMenuSel = townMenuSel - 1
             if townMenuSel < 1 then townMenuSel = #TOWN_MENU end
-        elseif key == "down" or key == "s" then
+        elseif isKey("down", key) or key == "down" then
             townMenuSel = townMenuSel + 1
             if townMenuSel > #TOWN_MENU then townMenuSel = 1 end
-        elseif key == "return" or key == "space" then
+        elseif isKey("interact", key) or key == "return" then
             local sel = TOWN_MENU[townMenuSel]
             if sel == "상점" then
-                if shop.needsRefresh then
-                    shop:refresh()
-                end
+                if shop.needsRefresh then shop:refresh() end
                 gameState = "shop"
                 drag.item = nil
                 hoverItem = nil
@@ -2833,15 +2914,11 @@ function love.keypressed(key)
 
     -- 도감 조작
     if gameState == "bestiary" then
-        if key == "escape" then
-            gameState = "town"
-            return
-        end
         local totalRaces = 0
         for _ in pairs(RACE_DB) do totalRaces = totalRaces + 1 end
-        if key == "up" or key == "w" then
+        if isKey("up", key) or key == "up" then
             bestiaryScroll = math.max(0, bestiaryScroll - 1)
-        elseif key == "down" or key == "s" then
+        elseif isKey("down", key) or key == "down" then
             bestiaryScroll = math.min(math.max(0, totalRaces - 4), bestiaryScroll + 1)
         end
         return
@@ -2857,19 +2934,18 @@ function love.keypressed(key)
     -- 레벨업 스탯 배분
     if gameState == "levelup" and statAlloc then
         local STAT_KEYS = {"str", "dex", "int", "con", "lck"}
-        if key == "up" or key == "w" then
+        if isKey("up", key) or key == "up" then
             statAlloc.sel = statAlloc.sel - 1
             if statAlloc.sel < 1 then statAlloc.sel = #STAT_KEYS end
-        elseif key == "down" or key == "s" then
+        elseif isKey("down", key) or key == "down" then
             statAlloc.sel = statAlloc.sel + 1
             if statAlloc.sel > #STAT_KEYS then statAlloc.sel = 1 end
-        elseif key == "return" or key == "space" then
+        elseif isKey("interact", key) or key == "return" then
             local stat = STAT_KEYS[statAlloc.sel]
             player[stat] = player[stat] + 1
             statAlloc.points = statAlloc.points - 1
             addMessage(stat:upper() .. " +1! (현재 " .. player[stat] .. ")")
 
-            -- maxHp 재계산
             player.maxHp = getPlayerMaxHp()
             player.hp = math.min(player.hp, player.maxHp)
             player.maxMana = getPlayerMaxMana()
@@ -2886,15 +2962,15 @@ function love.keypressed(key)
 
     if gameState ~= "playing" then return end
 
-    if key == "up" or key == "w" then
+    if isKey("up", key) then
         movePlayer(0, -1)
-    elseif key == "down" or key == "s" then
+    elseif isKey("down", key) then
         movePlayer(0, 1)
-    elseif key == "left" or key == "a" then
+    elseif isKey("left", key) then
         movePlayer(-1, 0)
-    elseif key == "right" or key == "d" then
+    elseif isKey("right", key) then
         movePlayer(1, 0)
-    elseif key == "space" then
+    elseif isKey("wait", key) then
         turn = turn + 1
         processStatusEffects()
         moveEnemies()
@@ -4422,6 +4498,58 @@ local function drawSkillTree()
     drawSkillTreeSection("직업 특성 (" .. player.className .. ")", cData, sw/2 + 50, 100)
 end
 
+-- ===== 옵션 메뉴 그리기 =====
+local function drawOptions()
+    local sw, sh = love.graphics.getDimensions()
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    love.graphics.setColor(COLOR_GOLD)
+    love.graphics.printf("환경 설정 (Options)", 0, 50, sw, "center")
+
+    if waitingForKey then
+        love.graphics.setColor(1, 0.5, 0.5)
+        love.graphics.printf("변경할 새 키를 누르세요... (취소: ESC)", 0, 90, sw, "center")
+    else
+        love.graphics.setColor(0.7, 0.7, 0.7)
+        love.graphics.printf("위/아래: 선택 | 좌/우/엔터: 조절/변경 | ESC: 닫기", 0, 90, sw, "center")
+    end
+
+    local startY = 150
+    local actionMap = {
+        ["조작: 위"] = "up",
+        ["조작: 아래"] = "down",
+        ["조작: 좌"] = "left",
+        ["조작: 우"] = "right",
+        ["조작: 대기"] = "wait",
+        ["조작: 상호작용"] = "interact",
+        ["조작: 인벤토리"] = "inventory",
+        ["조작: 스킬트리"] = "skilltree"
+    }
+
+    for i, menuText in ipairs(OPTIONS_MENU) do
+        if i == optionsMenuSel then
+            love.graphics.setColor(COLOR_GOLD)
+            love.graphics.print("> " .. menuText, sw/2 - 150, startY + i*30)
+        else
+            love.graphics.setColor(COLOR_WHITE)
+            love.graphics.print("  " .. menuText, sw/2 - 150, startY + i*30)
+        end
+
+        local valText = ""
+        if menuText == "오디오: BGM" then
+            valText = tostring(CONFIG.audio.bgm) .. "%"
+        elseif menuText == "오디오: SFX" then
+            valText = tostring(CONFIG.audio.sfx) .. "%"
+        elseif actionMap[menuText] then
+            valText = "[" .. tostring(CONFIG.keys[actionMap[menuText]]:upper()) .. "]"
+        end
+        
+        love.graphics.setColor(COLOR_WHITE)
+        love.graphics.print(valText, sw/2 + 100, startY + i*30)
+    end
+end
+
 function love.draw()
     if gameState == "charselect" then
         drawCharSelect()
@@ -4439,6 +4567,9 @@ function love.draw()
     elseif gameState == "skilltree" then
         drawGame()
         drawSkillTree()
+    elseif gameState == "options" then
+        drawGame()
+        drawOptions()
     else
         drawGame()
         if gameState == "inventory" then
