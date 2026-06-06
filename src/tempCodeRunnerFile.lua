@@ -1,0 +1,2 @@
+
+    gr.setLineWidth(4)

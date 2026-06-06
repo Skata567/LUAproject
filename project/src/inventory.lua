@@ -198,10 +198,16 @@ function Inventory:drawItem(item)
     love.graphics.setLineWidth(1)
 
     -- 아이콘
-    love.graphics.setColor(item.color[1], item.color[2], item.color[3])
-    local iconX = cx + w / 2 - 6
+    local iconX = cx + w / 2 - 8
     local iconY = cy + h / 2 - 8
-    love.graphics.print(item.icon, iconX, iconY)
+    local itemKey = getItemQuadKey(item)
+    if ENTITY_QUADS and ENTITY_QUADS[itemKey] and TILESET_IMAGE then
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], iconX, iconY)
+    else
+        love.graphics.setColor(item.color[1], item.color[2], item.color[3])
+        love.graphics.print(item.icon, iconX + 2, iconY)
+    end
 
     -- 아이템 이름 (작은 텍스트)
     love.graphics.setColor(1, 1, 1, 0.9)
@@ -237,8 +243,16 @@ function Inventory:drawDragItem(item, mx, my)
     love.graphics.setLineWidth(1)
 
     -- 아이콘
-    love.graphics.setColor(item.color[1], item.color[2], item.color[3], 0.8)
-    love.graphics.print(item.icon, dx + w / 2 - 6, dy + h / 2 - 8)
+    local iconX = dx + w / 2 - 8
+    local iconY = dy + h / 2 - 8
+    local itemKey = getItemQuadKey(item)
+    if ENTITY_QUADS and ENTITY_QUADS[itemKey] and TILESET_IMAGE then
+        love.graphics.setColor(1, 1, 1, 0.8)
+        love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], iconX, iconY)
+    else
+        love.graphics.setColor(item.color[1], item.color[2], item.color[3], 0.8)
+        love.graphics.print(item.icon, iconX + 2, iconY)
+    end
 end
 
 --- 배치 가능 여부 프리뷰 그리기

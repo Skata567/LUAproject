@@ -61,6 +61,7 @@ Item.SLOT_NAMES = {
     boots   = "신발",
     ring    = "반지",
     amulet  = "목걸이",
+    torch   = "조명",
 }
 
 --- 아이템 생성
@@ -81,6 +82,7 @@ function Item.new(data)
     self.color = data.color or {0.8, 0.8, 0.8}
     self.passive = data.passive or nil  -- {type="lifesteal", value=10, desc="..."}
     self.element = data.element or "physical"  -- 공격 속성: physical/slash/pierce/strike/fire/ice/lightning/poison/holy
+    self.cursed = data.cursed or false
     return self
 end
 
@@ -102,6 +104,7 @@ function Item:clone()
         color = {self.color[1], self.color[2], self.color[3]},
         passive = nil,
         element = self.element,
+        cursed = self.cursed,
     }
     for k, v in pairs(self.stats) do
         data.stats[k] = v
@@ -198,6 +201,24 @@ end
 
 -- ===== 아이템 데이터베이스 =====
 Item.DATABASE = {
+    -- =============================================
+    -- 조명 (횃불류)
+    -- =============================================
+    basic_torch = Item.new({
+        id = "basic_torch", name = "나무 횃불", description = "어둠을 밝히는 기본적인 횃불. 수명이 짧다.",
+        gridW = 1, gridH = 2, rarity = "common", slot = "torch",
+        icon = "i", color = {1.0, 0.6, 0.2},
+        stats = {},
+        passive = {type = "torch", value = 150, desc = "시야 10칸 제공 (150턴)"},
+    }),
+    magic_lantern = Item.new({
+        id = "magic_lantern", name = "마력의 랜턴", description = "오래가는 신비한 빛을 내는 랜턴.",
+        gridW = 1, gridH = 2, rarity = "rare", slot = "torch",
+        icon = "i", color = {0.2, 0.8, 1.0},
+        stats = {int = 1},
+        passive = {type = "torch", value = 300, desc = "시야 10칸 제공 (300턴)"},
+    }),
+
     -- =============================================
     -- 무기: 한손
     -- =============================================
@@ -630,6 +651,14 @@ Item.DATABASE = {
         stats = {hp = 30, def = 5, atk = 5},
         passive = {type = "regen", value = 3, desc = "매 턴 HP 3 회복"},
     }),
+    cursed_chalice = Item.new({
+        id = "cursed_chalice", name = "저주받은 성배", description = "강력하지만 귀환 전까지 해제 불가",
+        gridW = 1, gridH = 1, rarity = "legendary", slot = "amulet",
+        icon = "V", color = {0.8, 0.1, 0.2},
+        stats = {atk = 15, hp = 30, crit = 15},
+        cursed = true,
+        passive = {type = "lifesteal", value = 15, desc = "공격 데미지의 15% HP 흡수"},
+    }),
 
     -- =============================================
     -- 소비 아이템
@@ -644,6 +673,12 @@ Item.DATABASE = {
         id = "large_potion", name = "대형 포션", description = "HP를 80 회복",
         gridW = 1, gridH = 2, rarity = "uncommon", slot = nil,
         icon = "!", color = {1.0, 0.4, 0.6},
+        stackable = true,
+    }),
+    return_scroll = Item.new({
+        id = "return_scroll", name = "귀환 주문서", description = "3턴 대기 후 마을로 귀환 (피격 시 취소)",
+        gridW = 1, gridH = 1, rarity = "uncommon", slot = nil,
+        icon = "~", color = {0.8, 0.6, 1.0},
         stackable = true,
     }),
 

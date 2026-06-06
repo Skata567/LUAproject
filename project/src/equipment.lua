@@ -22,6 +22,7 @@ local SLOT_LAYOUT = {
     {slot = "weapon2", label = "보조",     offsetX = 80,   offsetY = 0},
     {slot = "ring",    label = "반지",     offsetX = -80,  offsetY = 70},
     {slot = "boots",   label = "신발",     offsetX = 0,    offsetY = 70},
+    {slot = "torch",   label = "조명",     offsetX = 80,   offsetY = 70},
 }
 
 function Equipment.new()
@@ -34,6 +35,7 @@ function Equipment.new()
         boots   = nil,
         ring    = nil,
         amulet  = nil,
+        torch   = nil,
     }
     self.x = 0
     self.y = 0
@@ -255,8 +257,16 @@ function Equipment:draw(font)
             love.graphics.rectangle("line", cx + 1, cy + 1, ss - 2, ss - 2, 4, 4)
             love.graphics.setLineWidth(1)
 
-            love.graphics.setColor(item.color[1], item.color[2], item.color[3])
-            love.graphics.print(item.icon, cx + ss / 2 - 6, cy + ss / 2 - 8)
+            local iconX = cx + ss / 2 - 8
+            local iconY = cy + ss / 2 - 8
+            local itemKey = getItemQuadKey(item)
+            if ENTITY_QUADS and ENTITY_QUADS[itemKey] and TILESET_IMAGE then
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], iconX, iconY)
+            else
+                love.graphics.setColor(item.color[1], item.color[2], item.color[3])
+                love.graphics.print(item.icon, iconX + 2, iconY)
+            end
         else
             -- 빈 슬롯
             love.graphics.setColor(0.3, 0.3, 0.35, 0.5)

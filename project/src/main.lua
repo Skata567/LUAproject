@@ -5,12 +5,14 @@ local Item = require("item")
 local Inventory = require("inventory")
 local Equipment = require("equipment")
 local Shop = require("shop")
+local FOV = require("fov")
+local SKILLS_DB = require("skills_db")
 
 -- ===== 설정 =====
 local TILE_SIZE = 16
-local MAP_WIDTH = 50
-local MAP_HEIGHT = 35
-local MAX_ROOMS = 10
+local MAP_WIDTH = 100
+local MAP_HEIGHT = 100
+local MAX_ROOMS = 25
 local MIN_ROOM_SIZE = 4
 local MAX_ROOM_SIZE = 10
 local MAX_ENEMIES_PER_ROOM = 4
@@ -24,10 +26,18 @@ local TILE_WALL = 0
 local TILE_FLOOR = 1
 local TILE_STAIR_DOWN = 2
 local TILE_STAIR_UP = 3
+local TILE_WATER = 4
+local TILE_LAVA = 5
+local TILE_GRASS = 6
+local TILE_DIRT = 7
 
 -- 색상
 local COLOR_WALL     = {0.3, 0.3, 0.4}
 local COLOR_FLOOR    = {0.6, 0.6, 0.5}
+local COLOR_WATER    = {0.1, 0.4, 0.8}
+local COLOR_LAVA     = {0.9, 0.3, 0.1}
+local COLOR_GRASS    = {0.2, 0.6, 0.3}
+local COLOR_DIRT     = {0.5, 0.4, 0.2}
 local COLOR_PLAYER   = {1, 1, 0}
 local COLOR_STAIR    = {1, 0.8, 0}
 local COLOR_HUD_BG   = {0.1, 0.1, 0.15, 0.9}
@@ -39,9 +49,19 @@ local COLOR_WHITE    = {1, 1, 1}
 local COLOR_GRAY     = {0.5, 0.5, 0.5}
 local COLOR_GOLD     = {1, 0.85, 0}
 
+-- 타일셋 (프로시저럴 렌더링용)
+TILESET_IMAGE = nil
+TILE_QUADS = {}
+ENTITY_QUADS = {}
+
 -- 게임 상태
 local gameState = "charselect" -- charselect, playing, inventory, town, shop, stash, gameover, levelup, bestiary
+local channeling_return = 0
 local map = {}
+local visibleMap = {}
+local exploredMap = {}
+local camera = {x = 0, y = 0}
+local currentBiome = "dungeon"
 local rooms = {}
 local player = {}
 local enemies = {}
@@ -53,6 +73,9 @@ local floorStates = {}
 local font = nil
 local messageScroll = 0
 local MAX_VISIBLE_MESSAGES = 8
+
+local generateProceduralTileset -- 전방 선언
+local updateFOV, updateCamera   -- 전방 선언
 
 -- 캐릭터 선택 상태
 local charSelect = {
@@ -496,7 +519,10 @@ local DROP_TABLE = {
     -- 소비/재료
     {id = "health_potion", weight = 30, minFloor = 1},
     {id = "large_potion",  weight = 10, minFloor = 2},
+    {id = "return_scroll", weight = 15, minFloor = 1},
     {id = "gold_coin",     weight = 25, minFloor = 1},
+    {id = "basic_torch",   weight = 15, minFloor = 1},
+    {id = "magic_lantern", weight = 5,  minFloor = 3},
     -- 일반 무기
     {id = "short_sword",   weight = 15, minFloor = 1},
     {id = "rusty_sword",   weight = 18, minFloor = 1},
@@ -526,6 +552,7 @@ local DROP_TABLE = {
     -- 전설 무기
     {id = "dragon_blade",   weight = 1, minFloor = 5},
     {id = "soul_reaper",    weight = 1, minFloor = 5},
+    {id = "cursed_chalice", weight = 2, minFloor = 3},
     {id = "abyssal_scythe", weight = 1, minFloor = 5},
     -- 방패
     {id = "wooden_shield", weight = 12, minFloor = 1},
@@ -822,16 +849,104 @@ local function carveCorridor(x1, y1, x2, y2)
     end
 end
 
+local function generateSpecialTerrain()
+    local terrainTypes = {}
+    if floor <= 2 then
+        terrainTypes = {TILE_GRASS, TILE_DIRT, TILE_WATER}
+    elseif floor <= 4 then
+        terrainTypes = {TILE_DIRT, TILE_WATER, TILE_LAVA}
+    else
+        terrainTypes = {TILE_LAVA, TILE_DIRT}
+    end
+
+    local tempMap = {}
+    for y = 1, MAP_HEIGHT do
+        tempMap[y] = {}
+        for x = 1, MAP_WIDTH do
+            tempMap[y][x] = map[y][x]
+            if map[y][x] == TILE_FLOOR and math.random() < 0.08 then
+                tempMap[y][x] = terrainTypes[math.random(1, #terrainTypes)]
+            end
+        end
+    end
+
+    for iter = 1, 3 do
+        local nextMap = {}
+        for y = 1, MAP_HEIGHT do
+            nextMap[y] = {}
+            for x = 1, MAP_WIDTH do
+                nextMap[y][x] = tempMap[y][x]
+                if tempMap[y][x] ~= TILE_WALL and tempMap[y][x] ~= TILE_STAIR_UP and tempMap[y][x] ~= TILE_STAIR_DOWN then
+                    local counts = {}
+                    local maxCount = 0
+                    local dominantTile = tempMap[y][x]
+                    
+                    for dy = -1, 1 do
+                        for dx = -1, 1 do
+                            local ny, nx = y + dy, x + dx
+                            if ny > 0 and ny <= MAP_HEIGHT and nx > 0 and nx <= MAP_WIDTH then
+                                local t = tempMap[ny][nx]
+                                if t ~= TILE_WALL then
+                                    counts[t] = (counts[t] or 0) + 1
+                                    if counts[t] > maxCount then
+                                        maxCount = counts[t]
+                                        dominantTile = t
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    nextMap[y][x] = dominantTile
+                end
+            end
+        end
+        tempMap = nextMap
+    end
+
+    for y = 1, MAP_HEIGHT do
+        for x = 1, MAP_WIDTH do
+            if map[y][x] == TILE_FLOOR and tempMap[y][x] ~= TILE_FLOOR then
+                map[y][x] = tempMap[y][x]
+            end
+        end
+    end
+end
+
 local function createMap()
     map = {}
+    visibleMap = {}
+    exploredMap = {}
     rooms = {}
     enemies = {}
     groundItems = {}
 
+    local biomes = {"dungeon", "forest", "ice_cave", "volcano"}
+    currentBiome = biomes[math.random(1, #biomes)]
+
+    if currentBiome == "forest" then
+        COLOR_WALL = {0.2, 0.4, 0.2}
+        COLOR_FLOOR = {0.3, 0.5, 0.3}
+    elseif currentBiome == "ice_cave" then
+        COLOR_WALL = {0.6, 0.8, 0.9}
+        COLOR_FLOOR = {0.8, 0.9, 1.0}
+    elseif currentBiome == "volcano" then
+        COLOR_WALL = {0.3, 0.1, 0.1}
+        COLOR_FLOOR = {0.4, 0.2, 0.1}
+    else
+        COLOR_WALL = {0.3, 0.3, 0.4}
+        COLOR_FLOOR = {0.6, 0.6, 0.5}
+    end
+    -- 타일셋 다시 렌더링
+    generateProceduralTileset()
+
     for y = 1, MAP_HEIGHT do
         map[y] = {}
+        visibleMap[y] = {}
+        exploredMap[y] = {}
         for x = 1, MAP_WIDTH do
             map[y][x] = TILE_WALL
+            visibleMap[y][x] = false
+            exploredMap[y][x] = false
         end
     end
 
@@ -877,6 +992,8 @@ local function createMap()
         end
     end
 
+    generateSpecialTerrain()
+
     if #rooms > 1 then
         local firstRoom = rooms[1]
         local lastRoom = rooms[#rooms]
@@ -897,7 +1014,7 @@ local function getRandomFloorInRoom(room)
     for _ = 1, 30 do
         local x = math.random(room.x + 1, room.x + room.w - 2)
         local y = math.random(room.y + 1, room.y + room.h - 2)
-        if map[y] and map[y][x] == TILE_FLOOR then
+        if map[y] and map[y][x] ~= TILE_WALL and map[y][x] ~= TILE_LAVA and map[y][x] ~= TILE_STAIR_UP and map[y][x] ~= TILE_STAIR_DOWN then
             return x, y
         end
     end
@@ -1008,31 +1125,31 @@ local ENEMY_DB = {
     -- 1층: 약한 적
     {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}, race="beast", atkElement="pierce"},
     {name="고블린",      char="g", hp=6,  atk=2, def=0, spd=1.0, exp=6,  ev=10, color={0,0.8,0},     floors={1,2,3}, race="goblinoid", atkElement="slash"},
-    {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}, race="goblinoid", atkElement="pierce"},
-    {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}, race="beast", atkElement="pierce"},
-    {name="좀비",        char="z", hp=10, atk=2, def=2, spd=0.5, exp=8,  ev=0,  color={0.3,0.5,0.2}, floors={1,2,3}, race="undead", atkElement="strike"},
+    {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}, race="goblinoid", atkElement="pierce", biomes={"dungeon", "forest"}},
+    {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}, race="beast", atkElement="pierce", biomes={"dungeon", "ice_cave"}},
+    {name="좀비",        char="z", hp=10, atk=2, def=2, spd=0.5, exp=8,  ev=0,  color={0.3,0.5,0.2}, floors={1,2,3}, race="undead", atkElement="strike", biomes={"dungeon"}},
     -- 2층: 중간 적
-    {name="오크",        char="o", hp=12, atk=4, def=2, spd=1.0, exp=12, ev=8,  color={0.5,0.8,0.2}, floors={2,3,4}, race="orc", atkElement="slash"},
-    {name="스켈레톤",    char="s", hp=8,  atk=3, def=4, spd=0.8, exp=10, ev=5,  color={0.9,0.9,0.8}, floors={2,3}, race="undead", atkElement="slash"},
-    {name="독거미",      char="S", hp=7,  atk=3, def=0, spd=1.3, exp=10, ev=18, color={0.2,0.7,0.2}, floors={2,3}, race="insect", atkElement="poison"},
-    {name="늑대",        char="w", hp=9,  atk=4, def=1, spd=1.4, exp=10, ev=15, color={0.5,0.5,0.5}, floors={2,3}, race="beast", atkElement="pierce"},
-    {name="오크전사",    char="O", hp=18, atk=5, def=3, spd=0.9, exp=18, ev=8,  color={0.5,0.6,0.2}, floors={2,3,4}, race="orc", atkElement="strike"},
+    {name="오크",        char="o", hp=12, atk=4, def=2, spd=1.0, exp=12, ev=8,  color={0.5,0.8,0.2}, floors={2,3,4}, race="orc", atkElement="slash", biomes={"forest", "volcano"}},
+    {name="스켈레톤",    char="s", hp=8,  atk=3, def=4, spd=0.8, exp=10, ev=5,  color={0.9,0.9,0.8}, floors={2,3}, race="undead", atkElement="slash", biomes={"dungeon", "ice_cave"}},
+    {name="독거미",      char="S", hp=7,  atk=3, def=0, spd=1.3, exp=10, ev=18, color={0.2,0.7,0.2}, floors={2,3}, race="insect", atkElement="poison", biomes={"forest"}},
+    {name="늑대",        char="w", hp=9,  atk=4, def=1, spd=1.4, exp=10, ev=15, color={0.5,0.5,0.5}, floors={2,3}, race="beast", atkElement="pierce", biomes={"forest", "ice_cave"}},
+    {name="오크전사",    char="O", hp=18, atk=5, def=3, spd=0.9, exp=18, ev=8,  color={0.5,0.6,0.2}, floors={2,3,4}, race="orc", atkElement="strike", biomes={"forest", "volcano"}},
     -- 3층: 강한 적
-    {name="트롤",        char="T", hp=25, atk=7, def=3, spd=0.7, exp=25, ev=5,  color={0.3,0.6,0.3}, floors={3,4}, race="troll", atkElement="strike"},
-    {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}, race="construct", atkElement="strike"},
-    {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}, race="reptile", atkElement="slash"},
+    {name="트롤",        char="T", hp=25, atk=7, def=3, spd=0.7, exp=25, ev=5,  color={0.3,0.6,0.3}, floors={3,4}, race="troll", atkElement="strike", biomes={"forest"}},
+    {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}, race="construct", atkElement="strike", biomes={"dungeon", "volcano"}},
+    {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}, race="reptile", atkElement="slash", biomes={"forest", "ice_cave"}},
     {name="미노타우로스",char="M", hp=30, atk=8, def=4, spd=1.0, exp=30, ev=6,  color={0.6,0.3,0.1}, floors={3,4,5}, race="beast", atkElement="strike"},
-    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}, race="human", atkElement="fire"},
+    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}, race="human", atkElement="fire", biomes={"dungeon", "ice_cave"}},
     -- 4층: 엘리트
-    {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}, race="troll", atkElement="strike"},
-    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}, race="elf", atkElement="lightning"},
-    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}, race="human", atkElement="poison"},
-    {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}, race="construct", atkElement="strike"},
-    {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}, race="demon", atkElement="fire"},
+    {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}, race="troll", atkElement="strike", biomes={"forest", "volcano"}},
+    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}, race="elf", atkElement="lightning", biomes={"dungeon", "forest"}},
+    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}, race="human", atkElement="poison", biomes={"dungeon", "ice_cave"}},
+    {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}, race="construct", atkElement="strike", biomes={"dungeon", "volcano"}},
+    {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}, race="demon", atkElement="fire", biomes={"volcano"}},
     -- 5층: 보스급
-    {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}, race="dragon", atkElement="fire"},
-    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}, race="undead", atkElement="ice"},
-    {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}, race="construct", atkElement="strike"},
+    {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}, race="dragon", atkElement="fire", biomes={"volcano"}},
+    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}, race="undead", atkElement="ice", biomes={"ice_cave"}},
+    {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}, race="construct", atkElement="strike", biomes={"dungeon"}},
     {name="악마",        char="&", hp=50, atk=16,def=6, spd=1.2, exp=90, ev=18, color={0.8,0.1,0.1}, floors={5}, race="demon", atkElement="fire"},
     {name="고대용",      char="@", hp=100,atk=20,def=10,spd=0.9, exp=150,ev=8,  color={1.0,0.8,0.0}, floors={5}, race="dragon", atkElement="fire"},
 }
@@ -1076,11 +1193,27 @@ end
 local function spawnEnemies()
     local available = {}
     for _, e in ipairs(ENEMY_DB) do
+        local floorMatch = false
         for _, f in ipairs(e.floors) do
             if f == floor then
-                table.insert(available, e)
+                floorMatch = true
                 break
             end
+        end
+
+        local biomeMatch = true
+        if e.biomes then
+            biomeMatch = false
+            for _, b in ipairs(e.biomes) do
+                if b == currentBiome then
+                    biomeMatch = true
+                    break
+                end
+            end
+        end
+
+        if floorMatch and biomeMatch then
+            table.insert(available, e)
         end
     end
     if #available == 0 then return end
@@ -1231,6 +1364,8 @@ local function initPlayer(keepStats)
             expBonus = race.expBonus or 0,
             buffs = {},  -- {id, name, duration, ...}
             nextAtkBonus = nil,  -- 다음 공격 보너스 (강타/급소 등)
+            skillPoints = 0,
+            unlockedSkills = {},  -- { skill_id = true }
         }
     end
 end
@@ -1314,7 +1449,11 @@ end
 
 --- 패시브 보정된 회피율
 local function getPlayerEvasionFull()
-    return getPlayerEvasion() + getPassiveValue("dodge_boost")
+    local ev = getPlayerEvasion() + getPassiveValue("dodge_boost")
+    if map[player.y] and map[player.y][player.x] == TILE_WATER then
+        ev = ev - 15
+    end
+    return ev
 end
 
 --- 패시브 보정된 치명타
@@ -1371,12 +1510,42 @@ end
 
 getBuffStatBonus = function(stat)
     local total = 0
-    if not player.buffs then return total end
-    for _, b in ipairs(player.buffs) do
-        if b.duration > 0 and b.statBonus and b.statBonus[stat] then
-            total = total + b.statBonus[stat]
+    if player.buffs then
+        for _, b in ipairs(player.buffs) do
+            if b.duration > 0 and b.statBonus and b.statBonus[stat] then
+                total = total + b.statBonus[stat]
+            end
         end
     end
+    
+    -- 패시브 스킬 합산
+    if player.unlockedSkills and SKILLS_DB then
+        local rData = SKILLS_DB.races[player.raceId]
+        local cData = SKILLS_DB.classes[player.classId]
+        
+        local function addPassives(data)
+            if not data then return end
+            local tiers = {data.tier1, data.tier2, data.tier3}
+            for t=1, 3 do
+                if tiers[t] then
+                    for _, s in ipairs(tiers[t]) do
+                        if player.unlockedSkills[s.id] and s.statBonus then
+                            -- skills_db.lua의 key와 main.lua의 stat name 매핑
+                            local mappedKey = stat
+                            if stat == "hp" and s.statBonus.maxHp then total = total + s.statBonus.maxHp end
+                            if stat == "def" and s.statBonus.def then total = total + s.statBonus.def end
+                            if stat == "evasion" and s.statBonus.ev then total = total + s.statBonus.ev end
+                            if stat == "crit" and s.statBonus.critChance then total = total + s.statBonus.critChance end
+                            if s.statBonus[stat] then total = total + s.statBonus[stat] end
+                        end
+                    end
+                end
+            end
+        end
+        addPassives(rData)
+        addPassives(cData)
+    end
+    
     return total
 end
 
@@ -1514,6 +1683,7 @@ local function checkLevelUp()
         player.exp = player.exp - player.nextExp
         player.level = player.level + 1
         player.baseAtk = player.baseAtk + 1
+        player.skillPoints = player.skillPoints + 1
         player.nextExp = math.floor(player.nextExp * 1.5)
 
         -- 스탯 포인트 3점 배분
@@ -1524,7 +1694,7 @@ local function checkLevelUp()
         player.maxHp = getPlayerMaxHp()
         player.hp = player.maxHp
 
-        addMessage("** 레벨 업! Lv." .. player.level .. " — 스탯 포인트 3점을 배분하세요! **")
+        addMessage("** 레벨 업! Lv." .. player.level .. " — 스탯 포인트 3점 및 스킬 포인트 1점 획득! **")
     end
 end
 
@@ -1752,6 +1922,10 @@ local function enemyAttack(enemy)
     dmg = math.max(1, math.floor(dmg * pDefMult))
 
     player.hp = player.hp - dmg
+    if channeling_return > 0 then
+        channeling_return = 0
+        addMessage("피격당해 귀환 주문서 시전이 취소되었습니다!", {1.0, 0.2, 0.2})
+    end
     local elemName = Item.ELEMENT_NAMES[eElem] or eElem
     if eElem ~= "physical" then
         local extra = ""
@@ -1904,6 +2078,8 @@ local function checkStair()
         setPlayerAtFloorEntry("down")
         player.maxMana = getPlayerMaxMana()
         player.mana = math.min(player.mana or player.maxMana, player.maxMana)
+        updateFOV()
+        updateCamera()
     elseif tile == TILE_STAIR_UP then
         if floor <= 1 then return end
         saveFloorState()
@@ -1914,6 +2090,8 @@ local function checkStair()
         setPlayerAtFloorEntry("up")
         player.maxMana = getPlayerMaxMana()
         player.mana = math.min(player.mana or player.maxMana, player.maxMana)
+        updateFOV()
+        updateCamera()
     end
 end
 
@@ -1972,6 +2150,51 @@ local function processStatusEffects()
     -- 버프/스킬 쿨다운 처리
     tickBuffs()
     tickSkillCooldowns()
+
+    -- 횃불(조명) 수명 감소
+    if equip and equip.slots.torch then
+        local torch = equip.slots.torch
+        if torch.passive and torch.passive.type == "torch" then
+            torch.passive.value = torch.passive.value - 1
+            if torch.passive.value <= 0 then
+                equip:equip(nil, "torch") -- 장착 해제 및 파괴
+                addMessage("횃불이 다 탔습니다! 주위가 어두워집니다.", {1, 0.5, 0.5})
+            end
+        end
+    end
+
+    if channeling_return > 0 then
+        channeling_return = channeling_return - 1
+        if channeling_return <= 0 then
+            addMessage("무사히 귀환했습니다!", {0.5, 1.0, 0.5})
+            goToTown()
+        else
+            addMessage("귀환까지 " .. channeling_return .. "턴 남았습니다...", {0.8, 0.6, 1.0})
+        end
+    end
+
+    -- 지형 효과 적용 (용암)
+    if map[player.y] and map[player.y][player.x] == TILE_LAVA then
+        local dmg = math.max(1, math.floor(getPlayerMaxHp() * 0.05))
+        player.hp = player.hp - dmg
+        addMessage("용암을 밟아 " .. dmg .. "의 화상 데미지를 입었습니다!", {1.0, 0.3, 0.1})
+        if channeling_return > 0 then
+            channeling_return = 0
+            addMessage("피격당해 귀환 주문서 시전이 취소되었습니다!", {1.0, 0.2, 0.2})
+        end
+    end
+
+    for _, enemy in ipairs(enemies) do
+        if enemy.alive and map[enemy.y] and map[enemy.y][enemy.x] == TILE_LAVA then
+            local dmg = math.max(1, math.floor(enemy.maxHp * 0.05))
+            enemy.hp = enemy.hp - dmg
+            if enemy.hp <= 0 then
+                enemy.alive = false
+                addMessage(enemy.name .. "이(가) 용암에 타죽었습니다!", {1.0, 0.5, 0.1})
+                gainExp(enemy.exp)
+            end
+        end
+    end
 end
 
 -- ===== 적 AI =====
@@ -2014,6 +2237,46 @@ local function moveEnemies()
     end
 end
 
+function updateCamera()
+    local screenW = 1280 - 270
+    local screenH = 720
+    camera.x = math.max(0, math.min((player.x * TILE_SIZE) - (screenW / 2), (MAP_WIDTH * TILE_SIZE) - screenW))
+    camera.y = math.max(0, math.min((player.y * TILE_SIZE) - (screenH / 2), (MAP_HEIGHT * TILE_SIZE) - screenH))
+end
+
+function updateFOV()
+    local radius = 5
+    -- 종족 기본 시야
+    if player.raceName == "뱀파이어" or player.raceName == "자동인형" then
+        radius = 8
+    end
+    -- 횃불 장착 시 시야 보너스
+    if equip and equip.slots.torch then
+        radius = 10
+    end
+
+    local function isOpaque(x, y)
+        if y < 1 or y > MAP_HEIGHT or x < 1 or x > MAP_WIDTH then return true end
+        return map[y][x] == TILE_WALL
+    end
+
+    visibleMap = FOV.calculate(player.x, player.y, radius, map, MAP_WIDTH, MAP_HEIGHT, isOpaque, visibleMap)
+
+    -- 시야에 들어온 곳은 탐험됨 처리 (반경 내에서만 확인하여 최적화)
+    local startX = math.max(1, player.x - radius)
+    local endX = math.min(MAP_WIDTH, player.x + radius)
+    local startY = math.max(1, player.y - radius)
+    local endY = math.min(MAP_HEIGHT, player.y + radius)
+
+    for y = startY, endY do
+        for x = startX, endX do
+            if visibleMap[y][x] then
+                exploredMap[y][x] = true
+            end
+        end
+    end
+end
+
 -- ===== 플레이어 이동 =====
 local function movePlayer(dx, dy)
     if gameState ~= "playing" then return end
@@ -2042,6 +2305,9 @@ local function movePlayer(dx, dy)
     checkStair()
     processStatusEffects()
     moveEnemies()
+    
+    updateFOV()
+    updateCamera()
 end
 
 -- ===== LÖVE2D 콜백 =====
@@ -2117,9 +2383,237 @@ local function resetAfterDeath()
     gameState = "charselect"
 end
 
+function generateProceduralTileset()
+    local canvasWidth = 256
+    local canvasHeight = 256
+    local canvas = love.graphics.newCanvas(canvasWidth, canvasHeight)
+    love.graphics.setCanvas(canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    
+    local tx, ty = 0, 0
+    local function getNextRect()
+        local rx, ry = tx * TILE_SIZE, ty * TILE_SIZE
+        tx = tx + 1
+        if tx * TILE_SIZE >= canvasWidth then
+            tx = 0
+            ty = ty + 1
+        end
+        return rx, ry
+    end
+    
+    local function createTileQuad(colorBase, colorDetail, drawDetailFunc)
+        local x, y = getNextRect()
+        love.graphics.setColor(colorBase)
+        love.graphics.rectangle("fill", x, y, TILE_SIZE, TILE_SIZE)
+        love.graphics.setColor(colorDetail)
+        if drawDetailFunc then
+            drawDetailFunc(x, y)
+        end
+        return love.graphics.newQuad(x, y, TILE_SIZE, TILE_SIZE, canvasWidth, canvasHeight)
+    end
+
+    TILE_QUADS[TILE_WALL] = createTileQuad(COLOR_WALL, {0.2, 0.2, 0.25}, function(x, y)
+        love.graphics.rectangle("line", x, y, TILE_SIZE, TILE_SIZE)
+        love.graphics.line(x, y + 8, x + 16, y + 8)
+        love.graphics.line(x + 8, y, x + 8, y + 8)
+        love.graphics.line(x + 4, y + 8, x + 4, y + 16)
+        love.graphics.line(x + 12, y + 8, x + 12, y + 16)
+    end)
+    TILE_QUADS[TILE_FLOOR] = createTileQuad(COLOR_FLOOR, {0.5, 0.5, 0.4}, function(x, y)
+        love.graphics.rectangle("line", x, y, TILE_SIZE, TILE_SIZE)
+        love.graphics.rectangle("fill", x+3, y+3, 1, 1)
+        love.graphics.rectangle("fill", x+12, y+8, 1, 1)
+        love.graphics.rectangle("fill", x+5, y+14, 1, 1)
+    end)
+    TILE_QUADS[TILE_WATER] = createTileQuad(COLOR_WATER, {0.2, 0.5, 0.9}, function(x, y)
+        love.graphics.line(x+2, y+4, x+6, y+4)
+        love.graphics.line(x+8, y+8, x+12, y+8)
+        love.graphics.line(x+4, y+12, x+8, y+12)
+    end)
+    TILE_QUADS[TILE_LAVA] = createTileQuad(COLOR_LAVA, {1.0, 0.6, 0.1}, function(x, y)
+        love.graphics.circle("fill", x+4, y+5, 2)
+        love.graphics.circle("fill", x+11, y+10, 3)
+        love.graphics.circle("fill", x+6, y+14, 1)
+    end)
+    TILE_QUADS[TILE_GRASS] = createTileQuad(COLOR_GRASS, {0.3, 0.8, 0.4}, function(x, y)
+        love.graphics.line(x+4, y+12, x+4, y+8)
+        love.graphics.line(x+5, y+12, x+6, y+7)
+        love.graphics.line(x+10, y+14, x+10, y+10)
+        love.graphics.line(x+11, y+14, x+13, y+9)
+    end)
+    TILE_QUADS[TILE_DIRT] = createTileQuad(COLOR_DIRT, {0.4, 0.3, 0.15}, function(x, y)
+        love.graphics.rectangle("fill", x+2, y+3, 4, 2)
+        love.graphics.rectangle("fill", x+10, y+8, 3, 3)
+        love.graphics.rectangle("fill", x+5, y+12, 2, 2)
+    end)
+    TILE_QUADS[TILE_STAIR_DOWN] = createTileQuad(COLOR_FLOOR, COLOR_STAIR, function(x, y)
+        love.graphics.rectangle("fill", x+2, y+2, 12, 12)
+        love.graphics.setColor(0,0,0)
+        love.graphics.rectangle("fill", x+4, y+4, 8, 8)
+    end)
+    TILE_QUADS[TILE_STAIR_UP] = createTileQuad(COLOR_FLOOR, {0.6, 0.9, 1.0}, function(x, y)
+        love.graphics.rectangle("fill", x+2, y+2, 12, 12)
+        love.graphics.setColor(1,1,1)
+        love.graphics.rectangle("fill", x+6, y+6, 4, 4)
+    end)
+
+    local function createEntityQuad(baseColor, eyeColor, isBig, typeStr)
+        local x, y = getNextRect()
+        love.graphics.setColor(baseColor)
+        
+        if typeStr == "dragon" then
+            love.graphics.polygon("fill", x, y+8, x+8, y, x+16, y+8)
+            love.graphics.rectangle("fill", x+2, y+8, 12, 8)
+        elseif typeStr == "slime" then
+            love.graphics.arc("fill", "pie", x+8, y+16, 8, math.pi, math.pi*2)
+        elseif typeStr == "skeleton" then
+            love.graphics.rectangle("fill", x+3, y+2, 10, 10)
+            love.graphics.rectangle("fill", x+5, y+12, 6, 4)
+        elseif typeStr == "beast" then
+            love.graphics.polygon("fill", x+2, y+6, x+4, y, x+6, y+6)
+            love.graphics.polygon("fill", x+10, y+6, x+12, y, x+14, y+6)
+            love.graphics.rectangle("fill", x+2, y+6, 12, 10)
+        elseif typeStr == "humanoid" then
+            love.graphics.circle("fill", x+8, y+6, 4)
+            love.graphics.rectangle("fill", x+4, y+10, 8, 6)
+        else
+            if isBig then
+                love.graphics.rectangle("fill", x, y, 16, 16)
+            else
+                love.graphics.rectangle("fill", x+2, y+2, 12, 12)
+            end
+        end
+
+        love.graphics.setColor(eyeColor)
+        if typeStr == "slime" then
+            love.graphics.rectangle("fill", x+4, y+10, 2, 2)
+            love.graphics.rectangle("fill", x+10, y+10, 2, 2)
+        else
+            love.graphics.rectangle("fill", x+4, y+5, 2, 2)
+            love.graphics.rectangle("fill", x+10, y+5, 2, 2)
+        end
+
+        return love.graphics.newQuad(x, y, TILE_SIZE, TILE_SIZE, canvasWidth, canvasHeight)
+    end
+
+    ENTITY_QUADS["@"] = createEntityQuad({1, 1, 0}, {0,0,0}, false, "humanoid")
+    ENTITY_QUADS["r"] = createEntityQuad({0.6, 0.4, 0.2}, {1,0,0}, false, "beast")
+    ENTITY_QUADS["g"] = createEntityQuad({0.2, 0.8, 0.2}, {1,1,0}, false, "humanoid")
+    ENTITY_QUADS["k"] = createEntityQuad({0.7, 0.2, 0.2}, {0,0,0}, false, "humanoid")
+    ENTITY_QUADS["b"] = createEntityQuad({0.3, 0.3, 0.3}, {1,0,0}, false, "beast")
+    ENTITY_QUADS["z"] = createEntityQuad({0.4, 0.6, 0.4}, {0,0,0}, false, "humanoid")
+    ENTITY_QUADS["o"] = createEntityQuad({0.1, 0.5, 0.1}, {1,0,0}, true, "humanoid")
+    ENTITY_QUADS["s"] = createEntityQuad({0.9, 0.9, 0.9}, {0,0,0}, false, "skeleton")
+    ENTITY_QUADS["p"] = createEntityQuad({0.4, 0.2, 0.6}, {1,0,1}, false, "beast")
+    ENTITY_QUADS["w"] = createEntityQuad({0.6, 0.6, 0.6}, {1,1,0}, false, "beast")
+    ENTITY_QUADS["O"] = createEntityQuad({0.2, 0.6, 0.2}, {1,0,0}, true, "humanoid")
+    ENTITY_QUADS["T"] = createEntityQuad({0.3, 0.5, 0.3}, {0,0,0}, true, "humanoid")
+    ENTITY_QUADS["G"] = createEntityQuad({0.5, 0.5, 0.5}, {1,0,0}, true, "dragon")
+    ENTITY_QUADS["l"] = createEntityQuad({0.2, 0.6, 0.4}, {1,1,0}, false, "humanoid")
+    ENTITY_QUADS["M"] = createEntityQuad({0.6, 0.3, 0.1}, {1,0,0}, true, "beast")
+    ENTITY_QUADS["W"] = createEntityQuad({0.3, 0.1, 0.5}, {1,1,1}, false, "humanoid")
+    ENTITY_QUADS["U"] = createEntityQuad({0.6, 0.5, 0.4}, {0,0,0}, true, "humanoid")
+    ENTITY_QUADS["E"] = createEntityQuad({0.4, 0.4, 0.6}, {1,0,0}, false, "humanoid")
+    ENTITY_QUADS["N"] = createEntityQuad({0.2, 0.2, 0.2}, {1,0,0}, false, "humanoid")
+    ENTITY_QUADS["S"] = createEntityQuad({0.6, 0.6, 0.6}, {1,1,1}, true, "skeleton")
+    ENTITY_QUADS["H"] = createEntityQuad({0.9, 0.4, 0.1}, {1,1,0}, true, "beast")
+    ENTITY_QUADS["D"] = createEntityQuad({0.8, 0.2, 0.2}, {1,1,0}, true, "dragon")
+    ENTITY_QUADS["L"] = createEntityQuad({0.8, 0.8, 0.9}, {0,1,1}, false, "skeleton")
+    ENTITY_QUADS["C"] = createEntityQuad({0.7, 0.7, 0.8}, {1,0,1}, true, "humanoid")
+    ENTITY_QUADS["A"] = createEntityQuad({0.7, 0.1, 0.1}, {1,1,0}, true, "dragon")
+    ENTITY_QUADS["X"] = createEntityQuad({0.3, 0.1, 0.1}, {1,0.5,0}, true, "dragon")
+    
+    local function createItemQuad(typeStr)
+        local x, y = getNextRect()
+        if typeStr == "sword" then
+            love.graphics.setColor(0.8, 0.8, 0.8)
+            love.graphics.polygon("fill", x+12, y+2, x+14, y+4, x+4, y+14, x+2, y+12)
+            love.graphics.setColor(0.6, 0.3, 0.1)
+            love.graphics.line(x+6, y+10, x+2, y+14)
+        elseif typeStr == "shield" then
+            love.graphics.setColor(0.6, 0.4, 0.2)
+            love.graphics.polygon("fill", x+3, y+2, x+13, y+2, x+13, y+10, x+8, y+15, x+3, y+10)
+            love.graphics.setColor(0.8, 0.8, 0.8)
+            love.graphics.rectangle("fill", x+7, y+4, 2, 4)
+        elseif typeStr == "armor" then
+            love.graphics.setColor(0.5, 0.5, 0.6)
+            love.graphics.polygon("fill", x+4, y+2, x+12, y+2, x+14, y+6, x+12, y+14, x+4, y+14, x+2, y+6)
+        elseif typeStr == "potion" then
+            love.graphics.setColor(0.8, 0.8, 0.9)
+            love.graphics.rectangle("fill", x+6, y+2, 4, 4)
+            love.graphics.setColor(1, 0.2, 0.3)
+            love.graphics.polygon("fill", x+6, y+6, x+10, y+6, x+12, y+14, x+4, y+14)
+        elseif typeStr == "scroll" then
+            love.graphics.setColor(0.9, 0.9, 0.7)
+            love.graphics.rectangle("fill", x+3, y+3, 10, 10)
+            love.graphics.setColor(0.2, 0.2, 0.2)
+            love.graphics.line(x+5, y+6, x+11, y+6)
+            love.graphics.line(x+5, y+9, x+9, y+9)
+        elseif typeStr == "gold" then
+            love.graphics.setColor(1, 0.85, 0)
+            love.graphics.circle("fill", x+6, y+12, 3)
+            love.graphics.circle("fill", x+10, y+10, 3)
+            love.graphics.circle("fill", x+8, y+8, 3)
+        elseif typeStr == "ring" then
+            love.graphics.setColor(1, 0.85, 0)
+            love.graphics.circle("line", x+8, y+8, 4)
+            love.graphics.setColor(0.2, 0.8, 1)
+            love.graphics.circle("fill", x+8, y+4, 2)
+        elseif typeStr == "relic" then
+            love.graphics.setColor(0.8, 0.2, 0.6)
+            love.graphics.polygon("fill", x+8, y+2, x+14, y+8, x+8, y+14, x+2, y+8)
+        else
+            love.graphics.setColor(0.7, 0.7, 0.7)
+            love.graphics.rectangle("fill", x+4, y+4, 8, 8)
+        end
+        return love.graphics.newQuad(x, y, TILE_SIZE, TILE_SIZE, canvasWidth, canvasHeight)
+    end
+
+    -- 의미론적 아이템 매핑
+    ENTITY_QUADS["item_sword"] = createItemQuad("sword")
+    ENTITY_QUADS["item_bow"] = createItemQuad("sword") -- 임시로 sword 재사용
+    ENTITY_QUADS["item_wand"] = createItemQuad("sword")
+    ENTITY_QUADS["item_shield"] = createItemQuad("shield")
+    ENTITY_QUADS["item_armor"] = createItemQuad("armor")
+    ENTITY_QUADS["item_helmet"] = createItemQuad("armor") -- 임시로 armor 재사용
+    ENTITY_QUADS["item_boots"] = createItemQuad("shield") -- 임시로 약간 작은 쿼드 재사용
+    ENTITY_QUADS["item_potion"] = createItemQuad("potion")
+    ENTITY_QUADS["item_scroll"] = createItemQuad("scroll")
+    ENTITY_QUADS["item_gold"] = createItemQuad("gold")
+    ENTITY_QUADS["item_ring"] = createItemQuad("ring")
+    ENTITY_QUADS["item_relic"] = createItemQuad("relic")
+    ENTITY_QUADS["item_default"] = createItemQuad("default")
+
+    love.graphics.setCanvas()
+    love.graphics.setColor(1,1,1,1)
+    TILESET_IMAGE = canvas
+end
+
+function getItemQuadKey(item)
+    if item.slot == "weapon" or item.slot == "weapon1" or item.slot == "weapon2" then
+        if item.name:find("방패") then return "item_shield" end
+        if item.name:find("활") or item.name:find("석궁") then return "item_bow" end
+        if item.name:find("지팡이") then return "item_wand" end
+        return "item_sword"
+    elseif item.slot == "armor" then return "item_armor"
+    elseif item.slot == "helmet" then return "item_helmet"
+    elseif item.slot == "boots" then return "item_boots"
+    elseif item.slot == "ring" or item.slot == "amulet" then return "item_ring"
+    else
+        if item.name:find("포션") or item.name:find("물약") or item.name:find("영약") then return "item_potion"
+        elseif item.name:find("주문서") or item.name:find("스크롤") then return "item_scroll"
+        elseif item.name:find("유물") or item.name:find("성배") then return "item_relic"
+        elseif item.name:find("골드") or item.name:find("돈") or item.name:find("금화") then return "item_gold"
+        end
+    end
+    return "item_default"
+end
+
 function love.load()
     love.window.setTitle("Extraction Roguelike")
-    love.window.setMode(MAP_WIDTH * TILE_SIZE + 270, MAP_HEIGHT * TILE_SIZE + 10, {resizable = false})
+    love.window.setMode(1280, 720, {resizable = false})
+    
+    generateProceduralTileset()
 
     font = love.graphics.newFont("NanumGothicCoding.ttf", 13)
     love.graphics.setFont(font)
@@ -2243,6 +2737,17 @@ function love.keypressed(key)
                     checkLevelUp()
                 end
             end
+            return
+        end
+    end
+
+    -- 스킬 트리 토글
+    if key == "k" then
+        if gameState == "playing" then
+            gameState = "skilltree"
+            return
+        elseif gameState == "skilltree" then
+            gameState = "playing"
             return
         end
     end
@@ -2402,6 +2907,48 @@ end
 
 function love.mousepressed(x, y, button)
     if gameState == "charselect" then return end
+
+    -- 스킬 트리 클릭
+    if gameState == "skilltree" then
+        if button == 1 and player.skillPoints > 0 then
+            local rData = SKILLS_DB.races[player.raceId]
+            local cData = SKILLS_DB.classes[player.classId]
+            if not rData or not cData then return end
+            
+            local function checkClick(data)
+                local tiers = {data.tier1, data.tier2, data.tier3}
+                for t=1, 3 do
+                    if tiers[t] then
+                        for _, s in ipairs(tiers[t]) do
+                            if s.uiBox and s.uiBox.unlocked and not s.uiBox.isUnlocked then
+                                if x >= s.uiBox.x and x <= s.uiBox.x + s.uiBox.w and y >= s.uiBox.y and y <= s.uiBox.y + s.uiBox.h then
+                                    -- 스킬 해금
+                                    player.skillPoints = player.skillPoints - 1
+                                    player.unlockedSkills[s.id] = true
+                                    addMessage(s.name .. " 스킬을 습득했습니다!")
+                                    
+                                    -- 만약 액티브 스킬이면 player.skills 에도 추가
+                                    if s.type == "active" then
+                                        local clone = {}
+                                        for k,v in pairs(s) do clone[k] = v end
+                                        clone.currentCd = 0
+                                        table.insert(player.skills, clone)
+                                    end
+                                    return true
+                                end
+                            end
+                        end
+                    end
+                end
+                return false
+            end
+            
+            if checkClick(rData) then return end
+            checkClick(cData)
+        end
+        return
+    end
+
     -- 상점 클릭
     if gameState == "shop" then
         if button == 1 then
@@ -2592,6 +3139,16 @@ function love.mousepressed(x, y, button)
                 item.count = item.count - 1
                 if item.count <= 0 then inv:removeItem(item) end
                 return
+            elseif item.id == "return_scroll" then
+                if channeling_return > 0 then
+                    addMessage("이미 시전 중입니다!", {1.0, 1.0, 0.0})
+                    return
+                end
+                channeling_return = 3
+                addMessage("귀환 주문서 시전 중... (3턴 대기)", {0.8, 0.6, 1.0})
+                item.count = item.count - 1
+                if item.count <= 0 then inv:removeItem(item) end
+                return
             end
             -- 장비 장착
             if item.slot then
@@ -2610,6 +3167,11 @@ function love.mousepressed(x, y, button)
 
         local slot = equip:getSlotAt(x, y)
         if slot then
+            local checkItem = equip:getItem(slot)
+            if checkItem and checkItem.cursed and gameState ~= "town" and gameState ~= "shop" then
+                addMessage("저주받은 유물은 마을에서만 해제할 수 있습니다!", {1.0, 0.2, 0.2})
+                return
+            end
             local eqItem = equip:unequip(slot)
             if eqItem then
                 if inv:autoPlace(eqItem) then
@@ -2769,66 +3331,105 @@ end
 
 -- ===== 그리기 =====
 local function drawGame()
-    -- 맵
-    for y = 1, MAP_HEIGHT do
-        for x = 1, MAP_WIDTH do
-            local tile = map[y][x]
-            local sx = (x - 1) * TILE_SIZE
-            local sy = (y - 1) * TILE_SIZE
+    love.graphics.push()
+    love.graphics.translate(-camera.x, -camera.y)
 
-            if tile == TILE_FLOOR then
-                love.graphics.setColor(COLOR_FLOOR)
-                love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
-                love.graphics.setColor(0.5, 0.5, 0.4)
-                love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
-            elseif tile == TILE_WALL then
-                love.graphics.setColor(COLOR_WALL)
-                love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
-                love.graphics.setColor(0.25, 0.25, 0.35)
-                love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
-            elseif tile == TILE_STAIR_DOWN then
-                love.graphics.setColor(COLOR_FLOOR)
-                love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
-                love.graphics.setColor(COLOR_STAIR)
-                love.graphics.print(">", sx + 3, sy)
-            elseif tile == TILE_STAIR_UP then
-                love.graphics.setColor(COLOR_FLOOR)
-                love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
-                love.graphics.setColor(0.6, 0.9, 1.0)
-                love.graphics.print("<", sx + 3, sy)
+    local screenW = 1280 - 270
+    local screenH = 720
+    
+    local startCol = math.floor(camera.x / TILE_SIZE)
+    local endCol = math.floor((camera.x + screenW) / TILE_SIZE) + 1
+    local startRow = math.floor(camera.y / TILE_SIZE)
+    local endRow = math.floor((camera.y + screenH) / TILE_SIZE) + 1
+
+    startCol = math.max(1, startCol)
+    endCol = math.min(MAP_WIDTH, endCol)
+    startRow = math.max(1, startRow)
+    endRow = math.min(MAP_HEIGHT, endRow)
+
+    -- 맵
+    for y = startRow, endRow do
+        for x = startCol, endCol do
+            if exploredMap[y] and exploredMap[y][x] then
+                local tile = map[y][x]
+                local sx = (x - 1) * TILE_SIZE
+                local sy = (y - 1) * TILE_SIZE
+
+                -- 시야 밖에 있으면 어둡게 처리
+                if visibleMap[y] and visibleMap[y][x] then
+                    love.graphics.setColor(1, 1, 1, 1)
+                else
+                    love.graphics.setColor(0.3, 0.3, 0.3, 1)
+                end
+
+                if TILE_QUADS[tile] and TILESET_IMAGE then
+                    love.graphics.draw(TILESET_IMAGE, TILE_QUADS[tile], sx, sy)
+                else
+                    if tile == TILE_FLOOR then
+                        love.graphics.setColor(COLOR_FLOOR[1]*0.5, COLOR_FLOOR[2]*0.5, COLOR_FLOOR[3]*0.5)
+                        love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
+                    elseif tile == TILE_WALL then
+                        love.graphics.setColor(COLOR_WALL[1]*0.5, COLOR_WALL[2]*0.5, COLOR_WALL[3]*0.5)
+                        love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
+                    end
+                end
             end
         end
     end
+    love.graphics.setColor(1, 1, 1, 1)
 
     -- 바닥 아이템
     for _, gi in ipairs(groundItems) do
-        if not gi.picked then
-            local rc = gi.item:getRarityColor()
-            love.graphics.setColor(rc[1], rc[2], rc[3])
-            love.graphics.print(gi.item.icon, (gi.x - 1) * TILE_SIZE + 3, (gi.y - 1) * TILE_SIZE)
+        if not gi.picked and visibleMap[gi.y] and visibleMap[gi.y][gi.x] then
+            local sx = (gi.x - 1) * TILE_SIZE
+            local sy = (gi.y - 1) * TILE_SIZE
+            local itemKey = getItemQuadKey(gi.item)
+            if ENTITY_QUADS[itemKey] and TILESET_IMAGE then
+                love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], sx, sy)
+            else
+                local rc = gi.item:getRarityColor()
+                love.graphics.setColor(rc[1], rc[2], rc[3])
+                love.graphics.print(gi.item.icon, sx + 3, sy)
+            end
         end
     end
+    love.graphics.setColor(1, 1, 1)
 
     -- 적
     for _, enemy in ipairs(enemies) do
-        if enemy.alive then
+        if enemy.alive and visibleMap[enemy.y] and visibleMap[enemy.y][enemy.x] then
+            local sx = (enemy.x - 1) * TILE_SIZE
+            local sy = (enemy.y - 1) * TILE_SIZE
             if enemy.isBoss then
                 love.graphics.setColor(1, 0.85, 0, 0.45)
-                love.graphics.rectangle("line", (enemy.x - 1) * TILE_SIZE, (enemy.y - 1) * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
+                love.graphics.setColor(1, 1, 1)
             end
-            love.graphics.setColor(enemy.color)
-            love.graphics.print(enemy.char, (enemy.x - 1) * TILE_SIZE + 3, (enemy.y - 1) * TILE_SIZE)
+            if ENTITY_QUADS[enemy.char] and TILESET_IMAGE then
+                love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[enemy.char], sx, sy)
+            else
+                love.graphics.setColor(enemy.color)
+                love.graphics.print(enemy.char, sx + 3, sy)
+            end
+            love.graphics.setColor(1, 1, 1)
         end
     end
 
     -- 플레이어
-    love.graphics.setColor(COLOR_PLAYER)
-    love.graphics.print(player.char, (player.x - 1) * TILE_SIZE + 3, (player.y - 1) * TILE_SIZE)
+    if ENTITY_QUADS["@"] and TILESET_IMAGE then
+        love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS["@"], (player.x - 1) * TILE_SIZE, (player.y - 1) * TILE_SIZE)
+    else
+        love.graphics.setColor(COLOR_PLAYER)
+        love.graphics.print(player.char, (player.x - 1) * TILE_SIZE + 3, (player.y - 1) * TILE_SIZE)
+    end
+    
+    love.graphics.pop()
 
     -- ===== HUD =====
-    local hudX = MAP_WIDTH * TILE_SIZE + 10
+    local hudW = 270
+    local hudX = 1280 - hudW
     local hudY = 10
-    local hudW = 230
+    local hudH = 720
 
     love.graphics.setColor(COLOR_HUD_BG)
     love.graphics.rectangle("fill", hudX - 5, 0, hudW + 10, MAP_HEIGHT * TILE_SIZE + 10)
@@ -3737,6 +4338,90 @@ local function drawBestiary()
     end
 end
 
+-- ===== 스킬 트리 그리기 =====
+local function drawSkillTree()
+    local sw, sh = love.graphics.getDimensions()
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    love.graphics.setColor(COLOR_GOLD)
+    love.graphics.printf("스킬 트리 - [K] 닫기", 0, 30, sw, "center")
+
+    love.graphics.setColor(COLOR_WHITE)
+    love.graphics.printf("사용 가능 포인트: " .. player.skillPoints .. "  /  현재 레벨: " .. player.level, 0, 60, sw, "center")
+
+    if not SKILLS_DB then return end
+
+    local rData = SKILLS_DB.races[player.raceId]
+    local cData = SKILLS_DB.classes[player.classId]
+
+    if not rData or not cData then
+        love.graphics.printf("해당 직업/종족의 스킬 데이터가 없습니다.", 0, sh/2, sw, "center")
+        return
+    end
+
+    local function drawSkillTreeSection(title, data, startX, startY)
+        love.graphics.setColor(COLOR_WHITE)
+        love.graphics.printf(title, startX, startY, 400, "center")
+
+        local tiers = {data.tier1, data.tier2, data.tier3}
+        local reqLevels = {1, 5, 10}
+
+        for t=1, 3 do
+            local ty = startY + 50 + (t-1)*120
+            local reqLvl = reqLevels[t]
+            local unlocked = player.level >= reqLvl
+            
+            love.graphics.setColor(0.7, 0.7, 0.7)
+            love.graphics.printf("Tier " .. t .. (unlocked and "" or " (Lv." .. reqLvl .. " 오픈)"), startX, ty, 400, "center")
+
+            local skills = tiers[t]
+            if skills then
+                for i, s in ipairs(skills) do
+                    local sx = startX + 50 + (i-1)*110
+                    local sy = ty + 30
+                    
+                    local isUnlocked = player.unlockedSkills[s.id]
+                    
+                    if isUnlocked then
+                        love.graphics.setColor(0.3, 0.8, 0.3, 0.9)
+                    elseif unlocked then
+                        love.graphics.setColor(0.2, 0.2, 0.2, 0.9)
+                    else
+                        love.graphics.setColor(0.1, 0.1, 0.1, 0.5)
+                    end
+                    
+                    love.graphics.rectangle("fill", sx, sy, 100, 60)
+                    love.graphics.setColor(COLOR_GOLD)
+                    love.graphics.rectangle("line", sx, sy, 100, 60)
+                    
+                    love.graphics.setColor(COLOR_WHITE)
+                    love.graphics.printf(s.name, sx, sy + 5, 100, "center")
+                    love.graphics.setColor(0.7, 0.7, 0.7)
+                    love.graphics.printf(s.type == "active" and "(액티브)" or "(패시브)", sx, sy + 25, 100, "center")
+                    
+                    -- 스킬 아이디와 클릭 박스를 위해 임시 데이터 저장 (mousepressed 연동용)
+                    s.uiBox = {x=sx, y=sy, w=100, h=60, unlocked=unlocked, isUnlocked=isUnlocked}
+                    
+                    -- 마우스 오버 툴팁
+                    local mx, my = love.mouse.getPosition()
+                    if mx >= sx and mx <= sx+100 and my >= sy and my <= sy+60 then
+                        love.graphics.setColor(0, 0, 0, 0.9)
+                        love.graphics.rectangle("fill", mx+15, my+15, 200, 60)
+                        love.graphics.setColor(COLOR_WHITE)
+                        love.graphics.printf(s.name, mx+20, my+20, 190, "left")
+                        love.graphics.setColor(0.8, 0.8, 0.8)
+                        love.graphics.printf(s.desc, mx+20, my+40, 190, "left")
+                    end
+                end
+            end
+        end
+    end
+
+    drawSkillTreeSection("종족 특성 (" .. player.raceName .. ")", rData, sw/2 - 450, 100)
+    drawSkillTreeSection("직업 특성 (" .. player.className .. ")", cData, sw/2 + 50, 100)
+end
+
 function love.draw()
     if gameState == "charselect" then
         drawCharSelect()
@@ -3751,6 +4436,9 @@ function love.draw()
     elseif gameState == "levelup" then
         drawGame()
         drawLevelUp()
+    elseif gameState == "skilltree" then
+        drawGame()
+        drawSkillTree()
     else
         drawGame()
         if gameState == "inventory" then

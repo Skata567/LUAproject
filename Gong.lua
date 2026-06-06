@@ -1,3 +1,4 @@
+--[[
 local config = {
     windowWidth = 800,
     windowHeight = 600,
@@ -1775,3 +1776,4 @@ function love.mousereleased(_, _, button)
     buttons.left.isDown = false
     buttons.right.isDown = false
 end
+]]

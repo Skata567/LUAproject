@@ -18,6 +18,8 @@ Shop.__index = Shop
 local SHOP_POOL = {
     {id = "health_potion", basePrice = 15,  weight = 30},
     {id = "large_potion",  basePrice = 40,  weight = 15},
+    {id = "basic_torch",   basePrice = 20,  weight = 25},
+    {id = "magic_lantern", basePrice = 150, weight = 5},
     {id = "short_sword",   basePrice = 25,  weight = 20},
     {id = "dagger",        basePrice = 35,  weight = 15},
     {id = "long_sword",    basePrice = 60,  weight = 10},
