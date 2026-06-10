@@ -49,6 +49,10 @@ Item.PASSIVE_NAMES = {
     gold_boost  = "골드 증가",
     dodge_boost = "회피 증가",
     crit_boost  = "치명타 증가",
+    execute     = "처형",
+    mana_steal  = "마나 흡수",
+    counter_attack = "반격",
+    revive      = "부활",
 }
 
 -- 장착 부위
@@ -287,6 +291,20 @@ Item.DATABASE = {
         stats = {atk = 22, crit = 18, spd = 2}, element = "holy",
         passive = {type = "lifesteal", value = 25, desc = "공격 데미지의 25% HP 흡수"},
     }),
+    mjolnir = Item.new({
+        id = "mjolnir", name = "묠니르", description = "신들의 무기로 알려진 벼락의 망치",
+        gridW = 1, gridH = 3, rarity = "legendary", slot = "weapon",
+        icon = "m", color = {1.0, 1.0, 0.2},
+        stats = {atk = 24, crit = 20, spd = -1}, element = "lightning",
+        passive = {type = "stun", value = 25, desc = "공격 시 25% 확률로 적 1턴 기절"},
+    }),
+    crystal_blade = Item.new({
+        id = "crystal_blade", name = "마력 깃든 수정검", description = "마나를 훔쳐오는 신비한 검",
+        gridW = 1, gridH = 3, rarity = "epic", slot = "weapon",
+        icon = "/", color = {0.2, 0.9, 1.0},
+        stats = {atk = 15, int = 3}, element = "slash",
+        passive = {type = "mana_steal", value = 20, desc = "입힌 데미지의 20% 마나 회복"},
+    }),
     holy_mace = Item.new({
         id = "holy_mace", name = "성스러운 메이스", description = "신성한 힘이 깃든 둔기",
         gridW = 1, gridH = 3, rarity = "rare", slot = "weapon",
@@ -361,6 +379,14 @@ Item.DATABASE = {
         icon = "}", color = {0.4, 0.0, 0.6},
         stats = {atk = 25, crit = 20, spd = 3}, element = "slash",
         passive = {type = "lifesteal", value = 20, desc = "공격 데미지의 20% HP 흡수"},
+    }),
+    executioner_axe = Item.new({
+        id = "executioner_axe", name = "처형인의 대부끼", description = "피비린내가 진동하는 사형수의 도끼",
+        gridW = 2, gridH = 4, rarity = "legendary", slot = "weapon",
+        twoHanded = true,
+        icon = "P", color = {0.8, 0.0, 0.0},
+        stats = {atk = 32, spd = -2}, element = "slash",
+        passive = {type = "execute", value = 15, desc = "적 체력 15% 이하 시 즉사 (보스 제외)"},
     }),
     silver_spear = Item.new({
         id = "silver_spear", name = "은빛 창", description = "신성한 은으로 만든 긴 창",
@@ -437,6 +463,13 @@ Item.DATABASE = {
         stats = {def = 18, hp = 25},
         passive = {type = "reflect", value = 30, desc = "피격 데미지의 30% 반사"},
     }),
+    aegis_shield = Item.new({
+        id = "aegis_shield", name = "이지스 방패", description = "절대 부서지지 않는 신성한 방패",
+        gridW = 2, gridH = 3, rarity = "legendary", slot = "weapon",
+        icon = "]", color = {0.9, 0.9, 0.2},
+        stats = {def = 25, hp = 40, int = 5},
+        passive = {type = "reflect", value = 40, desc = "피격 데미지의 40% 반사"},
+    }),
 
     -- =============================================
     -- 방어구
@@ -507,6 +540,13 @@ Item.DATABASE = {
         icon = "R", color = {0.35, 0.6, 0.35},
         stats = {def = 8, hp = 10, atk = 4},
         passive = {type = "lifesteal", value = 8, desc = "공격 데미지의 8% HP 흡수"},
+    }),
+    vengeance_armor = Item.new({
+        id = "vengeance_armor", name = "보복의 갑옷", description = "받은 피해를 반드시 되돌려주는 원한의 갑옷",
+        gridW = 2, gridH = 3, rarity = "epic", slot = "armor",
+        icon = "A", color = {0.8, 0.3, 0.5},
+        stats = {def = 14, hp = 20},
+        passive = {type = "counter_attack", value = 30, desc = "피격 시 30% 확률로 즉시 반격"},
     }),
 
     -- =============================================
@@ -620,6 +660,13 @@ Item.DATABASE = {
         stats = {atk = 8, crit = 12, hp = 10},
         passive = {type = "lifesteal", value = 10, desc = "공격 데미지의 10% HP 흡수"},
     }),
+    mana_stone_ring = Item.new({
+        id = "mana_stone_ring", name = "마나석 반지", description = "응축된 마나가 흘러넘치는 반지",
+        gridW = 1, gridH = 1, rarity = "epic", slot = "ring",
+        icon = "O", color = {0.3, 0.5, 1.0},
+        stats = {int = 10},
+        passive = {type = "regen", value = 2, desc = "매 턴 HP 2 회복"},
+    }),
 
     -- =============================================
     -- 목걸이
@@ -659,6 +706,13 @@ Item.DATABASE = {
         cursed = true,
         passive = {type = "lifesteal", value = 15, desc = "공격 데미지의 15% HP 흡수"},
     }),
+    phoenix_feather = Item.new({
+        id = "phoenix_feather", name = "불사조의 깃털", description = "사망 시 체력을 회복하며 부활 (소모품)",
+        gridW = 1, gridH = 1, rarity = "legendary", slot = "amulet",
+        icon = "V", color = {1.0, 0.5, 0.2},
+        stats = {hp = 20, def = 5},
+        passive = {type = "revive", value = 50, desc = "사망 시 체력 50% 회복 후 아이템 파괴"},
+    }),
 
     -- =============================================
     -- 소비 아이템
@@ -676,9 +730,21 @@ Item.DATABASE = {
         stackable = true,
     }),
     return_scroll = Item.new({
-        id = "return_scroll", name = "귀환 주문서", description = "3턴 대기 후 마을로 귀환 (피격 시 취소)",
+        id = "return_scroll", name = "귀환 주문서", description = "3턴 집중 후 마을로 귀환 (피격 시 취소)",
         gridW = 1, gridH = 1, rarity = "uncommon", slot = nil,
         icon = "~", color = {0.8, 0.6, 1.0},
+        stackable = true,
+    }),
+    dungeon_key = Item.new({
+        id = "dungeon_key", name = "신비한 던전 열쇠", description = "특별한 문이나 상자를 열 수 있는 열쇠",
+        gridW = 1, gridH = 1, rarity = "rare", slot = nil,
+        icon = "k", color = {1.0, 0.9, 0.2},
+        stackable = true,
+    }),
+    secret_scroll = Item.new({
+        id = "secret_scroll", name = "비밀 지역 스크롤", description = "미지의 영역으로 통하는 전설의 마법 스크롤",
+        gridW = 1, gridH = 1, rarity = "legendary", slot = nil,
+        icon = "~", color = {1.0, 0.3, 0.3},
         stackable = true,
     }),
 

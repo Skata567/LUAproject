@@ -15,3 +15,5 @@
 - AI가 잘못된 라이브러리 문법을 사용할 때 프로젝트 내 설정 파일(루프 및 전역 변수 지침 등)을 통해 컨텍스트를 바로잡고 수정함.
 - `love.graphics.points`가 LÖVE 11 버전 이상에서 컨텍스트 및 스케일 이슈로 블랙스크린을 야기하는 것을 확인하고, Canvas(`love.graphics.newCanvas`)를 이용한 절차적 텍스처 렌더링 방식(`generateProceduralTileset`)으로 전면 전환하여 최적화 및 렌더링 안정성을 달성함.
 - 100x100 대형 맵 도입 시 전체 타일을 순회 렌더링하면 성능이 저하될 것을 대비해, `visibleMap`과 `exploredMap`을 통한 시야 범위 및 탐험 영역에만 렌더링을 제한하고 카메라 오프셋(`translate`)을 통해 연산 부하를 최적화함.
+- `main.lua`의 대규모 리팩토링 중 전역 환경 오염(Global Pollution) 문제와 지역 변수 할당 해제에 따른 참조 에러가 발생. 이를 해결하기 위해 단순한 텍스트 파싱 대신, AI 에이전트와 함께 커스텀 스크립트를 작성하여 정밀한 블록 추출을 진행했으며, 의존성 주입(Dependency Injection)과 `local function` 전역화 트릭을 통해 기존 로직을 한 줄도 훼손하지 않고 전투 모듈(`combat.lua`)로 이관하는 데 성공함.
+- **연쇄적 에러 폭탄(Whack-a-Mole) 제어 경험**: 단일 파일 리팩토링 이후 맵 모듈(`map_generator.lua`)과 전투 모듈에 숨어있던 `groundItems`, `floorStates`, `floor` 등 잠재적 전역 변수 의존성을 AI를 활용해 전부 파악(Static Analysis). 중복된 데드 코드를 250줄 이상 제거하고 모든 변수 전달 방식을 Context Parameter 객체(`ctx`)로 변경하여 장기적인 안정성을 꾀함.

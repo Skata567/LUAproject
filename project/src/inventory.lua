@@ -138,6 +138,23 @@ function Inventory:getAllItems()
     return self.items
 end
 
+function Inventory:hasItem(id)
+    for _, item in ipairs(self.items) do
+        if item.id == id then return true end
+    end
+    return false
+end
+
+function Inventory:consumeItem(id)
+    for _, item in ipairs(self.items) do
+        if item.id == id then
+            self:removeItem(item)
+            return true
+        end
+    end
+    return false
+end
+
 --- 인벤토리 그리기
 function Inventory:draw(font)
     local cs = self.cellSize

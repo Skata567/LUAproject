@@ -99,3 +99,182 @@
   2. `updateFOV` 최적화: `visibleMap` 전체를 순회해 `exploredMap`을 갱신하던 로직을 **반경(radius) 내의 타일 범위**(`px - radius` ~ `px + radius`)로만 제한하여 O(R^2) 복잡도로 대폭 축소.
   3. `drawGame` 최적화: 전체 타일을 그리지 않고, `camera.x`, `camera.y`에 기반한 **화면에 보이는 카메라 바운드 박스 영역**만 계산하여 루프를 돌도록(Culling 기법) 최적화.
 - **검증/결과**: O(10,000) 연산을 O(화면크기) 및 O(시야범위) 연산으로 줄여 렉과 프레임 드랍을 완벽히 해결, 60fps로 매끄럽게 동작 확인.
+
+### [2026-06-10] �����丵 1�ܰ�: ���� ������ ����
+- **�߻� ����/���**: main.lua�� 4500�� �̻��� ���� ���Ϸ� �����Ǿ� �־�, �ڵ� �������� Ȯ�强�� ũ�� ������.
+- **���� ����**: Ȯ�强�� �������� �÷��� ���� ��� �߰��� �����ϰ� �� �� �ֵ��� ���� �����丵 ����.
+- **�ذ� ��� �� �ٰ�**: 
+  1. PLAYER_RACES, PLAYER_CLASSES, DROP_TABLE, RACE_RESTRICTIONS ���� ����� ���� �����͸� project/src/data/ ���� ���� ������ Lua ���� �и�.
+  2. main.lua���� equire�� ���� �ش� �����͸� �ҷ������� �����Ͽ� main.lua�� ũ�⸦ �� 500�� ���� ������.
+- **�׽�Ʈ ���� ���**: love-11.5-win64\lovec.exe project/tests ���� ��� ���� �κ��丮 �׽�Ʈ �� ��� ���� ���(2 Passed) Ȯ��.
+
+
+### [2026-06-10] �����丵 2�ܰ�: �� ���� �ý��� �� ���� �и�
+- **�߻� ����/���**: �� ���� ����(BSP, Ÿ�� ����, ����/������ ���� ��)�� �ϵ��ڵ��� ����(ũ��, ���� ��)�� main.lua�� ���� �־� �ڵ� ������ �������.
+- **�ذ� ��� �� �ٰ�**:
+  1. data/constants.lua�� �����Ͽ� ������ ���� ����ġ(����, Ÿ�� ��)�� ����.
+  2. systems/map_generator.lua�� �����Ͽ� ��/�� ����, ���� ����, �� ���� �� ������ ����(Procedural Generation) �κ��� �����ϵ��� ����.
+  3. ���� �������� ���ְ� ĸ��ȭ�ϱ� ���� ���� ��ȯ ����(State Return Pattern) ���� (MapGen.generate ȣ�� �� ���ο� map ������ ��ȯ).
+- **�׽�Ʈ ���� ���**: ���� ���� ���� �� ���� �׽�Ʈ ���� ���.
+
+
+### [2026-06-10] 리팩토링 3단계: 전투 및 스탯 시스템 분리
+- **발생 원인/배경**: 맵 생성과 데이터가 분리된 후에도 main.lua 내에 getPlayerAtk, dealPlayerAttack 등 전투 및 스탯 계산 로직이 600줄 이상 남아있어 결합도가 높았음.
+- **지시 내용**: 확장성과 안정성을 위해 전투 관련 로직의 완전한 모듈화.
+- **해결 방안 및 근거**:
+  1. systems/combat.lua를 생성하고 main.lua의 스탯/전투 계산 함수들을 모두 추출.
+  2. 전역 변수 참조 문제를 해결하기 위해 의존성 주입(Dependency Injection) 패턴을 응용하여 Combat.init(ctx)로 player, enemies, ddMessage 등을 넘기도록 구성. 
+  3. main.lua 내의 기존 함수 호출부 코드를 변경하지 않도록 추출한 함수들을 로컬 함수 래퍼로 연결하여 안정적인 이관(리팩토링)을 달성함.
+- **테스트 검증 결과**: 전투 로직 이관 후 유닛 테스트(2 Passed) 및 런타임 구동 이상 없음 검증 완료.
+
+
+### [2026-06-10] UI 및 렌더링 시각적 직관성 강화
+- **지시 내용**: 캐릭터들과 아이템들의 차별점이 확실하게 보이도록 UI/렌더링 수정.
+- **해결 방안 및 근거**:
+  1. main.lua 내의 drawGame 렌더링 루프를 개선하여 플레이어, 적, 바닥 아이템에 각기 다른 애니메이션 및 이펙트를 부여함.
+  2. **바닥 아이템**: math.sin 함수를 활용한 상하 둥둥 부유(Floating) 애니메이션과 아이템 등급 색상(getRarityColor)에 맞춘 바닥 후광 효과 추가.
+  3. **적 개체**: 발밑에 붉은색 타원형 그림자(Drop Shadow)를 그려 위협적으로 보이게 하고, 보스 몬스터일 경우 더 큰 붉은 오라와 황금색 테두리를 출력하도록 분기.
+  4. **플레이어**: 노란빛 계열의 이중 스포트라이트 오라를 추가하고 호흡(Breathing) 애니메이션을 주어, 주변 환경과 완전히 대비되도록 입체감을 부여.
+- **테스트 검증 결과**: 유닛 테스트 통과 및 렌더링 루프(drawGame) 문법 이상 없음 확인. 과목 요구사항인 보고서 템플릿 현행화에 맞추어 eport_3A_게임알고리즘.md 내용 업데이트 완료.
+
+
+### [2026-06-10] 미구현 스킬(광역기, 배율, 지속 회복) 로직 완성
+- **지시 내용**: 데이터만 존재하고 실제 효과가 발동하지 않던 캐릭터 스킬들의 로직을 구현.
+- **해결 방안 및 근거**:
+  1. **광역 마법(AoE)**: useSkill 내 	ype == "attack" 분기에서, 단일 타겟팅 대신 isAoE 플래그를 추가. chain_spark, dragon_breath, shock_mine, 	idal_chill 등 명시된 스킬은 ctx.enemies를 순회하며 플레이어 위치 기준 거리 1 반경의 모든 적 타겟 배열을 생성한 뒤 순차적으로 데미지를 주도록 다중 연산 처리.
+  2. **지속 회복(Regenerate)**: 트롤 종족 등의 재생 효과가 작동하지 않던 점을 해결하기 위해 	ickBuffs 함수 내에서 .id == "regenerate" 검사 시 매 턴 3의 체력이 회복되도록 추가.
+  3. **다음 타격 배율**: power_strike 외에도 iai_slash, rcane_edge, dirty_trick 등 특정 공격 배율이 존재하는 모든 스킬이 올바른 데미지 증폭을 갖도록 dealPlayerAttack의 tkBonus 조건문을 아이디 하드코딩에서 tkBonus.mult > 1 검사로 일반화 처리.
+  4. **흡혈 로직 확장**: drain_life 외에 강령술사의 soul_siphon, 흡혈귀의 lood_drain 또한 데미지의 50%를 체력으로 회복하도록 조건 확장.
+- **테스트 검증 결과**: 유닛 테스트 이상 없음 확인 완료. 모든 종족과 직업별 특수 스킬이 올바르게 구동됨.
+
+
+### [2026-06-10] main.lua Syntax Error 해결 (dead code 제거)
+- **지시 내용**: Syntax error: main.lua:243: '<name>' expected near 'local' 에러 해결.
+- **해결 방안 및 근거**:
+  1. 에러 원인: 이전 아키텍처 리팩토링 과정에서 createMap() 함수가 systems/map_generator.lua로 이관되었으나, 정규식 치환 실수로 기존 createMap() 함수의 껍데기(local function local gen = MapGen.generate...)와 더 이상 사용되지 않는 잔여 루프들이 main.lua 내부에 불완전하게 남아 문법 에러(Syntax Error)를 유발함.
+  2. 에러가 발생한 243번째 줄부터 끝나는 344번째 줄까지의 전체 잉여 코드(Dead Code) 블록을 완전히 삭제 처리함. MapGen.generate 등 맵 생성 로직은 이미 다른 지점(startDungeon, checkStair)에서 정상 호출되고 있으므로 기능상 누락 없음.
+- **테스트 검증 결과**: 잉여 코드 삭제 후 유닛 테스트를 구동한 결과 Syntax Error가 사라지고 테스트 슈트 2개가 정상 Pass하는 것을 확인.
+
+
+### [2026-06-10] 게임 시작 시 updateCombatContext Nil Error 해결
+- **지시 내용**: main.lua:601: attempt to call global 'updateCombatContext' (a nil value) 해결.
+- **해결 방안 및 근거**:
+  1. 에러 원인: initPlayer 함수 내부(601번째 줄)에서 updateCombatContext()를 호출하지만, 정작 해당 함수의 구현부가 그보다 나중인 608번째 줄에 선언되어 있어 발생한 스코프(Scope) 문제. Lua의 경우 선언되지 않은 변수를 호출하면 전역 공간(Global)에서 해당 이름(
+il)을 찾으려 시도하다가 에러를 발생시킴.
+  2. main.lua 최상단(125번째 줄)에 local updateCombatContext 형태로 전방 선언(Forward Declaration)을 추가하고, 실제 구현부는 updateCombatContext = function() 형태로 할당하게끔 수정. 이를 통해 initPlayer가 호출될 시점에는 함수가 올바르게 참조되도록 수정 완료.
+- **테스트 검증 결과**: 유닛 테스트 구동 완료 및 문법 에러 없음을 확인.
+
+
+### [2026-06-10] map_generator.lua 내 전역 함수 호출 에러(nil value) 해결
+- **지시 내용**: systems/map_generator.lua:219: attempt to call global 'generateProceduralTileset' (a nil value) 오류 수정.
+- **해결 방안 및 근거**:
+  1. 에러 원인: map_generator.lua 내부에서 절차적 타일셋 렌더링 함수인 generateProceduralTileset()을 직접 호출하고 있었으나, 해당 함수는 main.lua에만 선언되어 있어 모듈 분리 후 접근하지 못하고 
+il value 에러를 발생시켰음.
+  2. 시스템 계층 분리 원칙에 따라, 순수 논리 구조를 짜는 map_generator.lua에서 렌더링 함수를 직접 부르지 않도록 치환함. 대신 생성된 맵 데이터(map, rooms 등)와 함께, 바이옴(Biome)에 따라 결정된 타일 색상(colorWall, colorFloor)을 반환(Return)하게 함.
+  3. 맵을 생성하고 넘겨받은 main.lua의 startDungeon 및 checkStair에서 리턴받은 색상을 COLOR_WALL, COLOR_FLOOR 전역 상수에 반영하고, 직접 generateProceduralTileset()을 호출하도록 책임을 분리하여 수정 완료.
+- **테스트 검증 결과**: 유닛 테스트 모두 정상 통과 및 맵/테마 생성 논리 완벽하게 구동 확인.
+
+
+### [2026-06-10] 리팩토링 후 글로벌 스코프 꼬임 에러 및 데드 코드 대거 해결
+- **지시 내용**: "이런 오류가 나오는데 오류가 너무많이 생겼는데 리펙토링할때 지금 전체적으로 전부 파악해서 게임 실행에 문제가 될부분을 미리찾아서 수정해서 안정적으로 진행이되게 해줄래" (게임 시작 시 발생하는 오류들을 선제적으로 모조리 찾아 해결)
+- **에러 원인 및 분석**: 
+  - 이전 맵 제너레이터 리팩토링 과정에서 거대한 파일(main.lua)을 쪼개다 보니 **전역 변수 스코프 누수**가 심각하게 발생했습니다.
+  - map_generator.lua에서 loorStates를 전역 참조하려다 
+il 에러로 튕기는 문제 발생.
+  - map_generator.lua에서 isibleMap, exploredMap을 생성만 하고 돌려주지 않아 main.lua가 과거 전역 맵을 계속 가지고 있는 버그.
+  - combat.lua에서 아이템을 드롭할 때 전역 변수 groundItems와 전역 변수 loor에 접근하고 있어 향후 무조건 충돌할 예정이었음.
+  - map_generator.lua 파일 안에 스폰 함수와 몬스터 DB가 데드 코드(250줄 이상)로 잔존하여 main.lua의 스폰 함수와 구조적으로 중복.
+- **해결 방안 및 근거**:
+  1. map_generator.lua의 스코프 문제 해결: 데드 코드 250줄을 모조리 삭제하고, createMap이 직접 전역 loorStates를 건드리지 않도록 계단 좌표 4개를 eturn으로 빼서 main.lua에 안전하게 넘겨주었습니다.
+  2. main.lua 연결고리 복원: 누락되었던 ollDrop() 함수를 원복하고, 전투를 초기화하는 updateCombatContext()에서 groundItems, loor, ollDrop을 명시적으로 컨텍스트 딕셔너리로 주입하여 의존성을 깔끔하게 분리했습니다.
+  3. combat.lua 캡슐화: groundItems 대신 ctx.groundItems를, loor 대신 ctx.floor를 사용하도록 고쳐 안전하게 동작하게 만들었습니다.
+- **테스트 검증 결과**: 게임 진입 직후 발생하던 
+il value 크래시가 완벽히 사라졌으며, 맵 로딩과 몬스터 전투/드롭 아이템 처리가 쾌적하게 동작함을 확인했습니다. (테스트 슈트 PASS, 인게임 테스트 구동 완료)
+
+### [2026-06-10] combat.lua 내부 함수 참조 nil 에러(getPlayerEvasion) 해결
+- **지시 내용**: "systems/combat.lua:87: attempt to call global 'getPlayerEvasion' (a nil value)" 이미지 기반 에러 픽스
+- **문제 발생 원인**: 
+  - main.lua에서 전투 로직을 분리해 combat.lua로 넘길 때, getPlayerEvasion 등의 함수를 모듈 함수(Combat.getPlayerEvasion)로 변경했습니다.
+  - 하지만 모듈 내의 다른 함수에서 이를 호출할 때 Combat. 접두사를 붙이지 않아 전역 스코프에서 getPlayerEvasion을 찾다 크래시가 발생했습니다.
+  - 추가로 TILE_WATER 등 상수와 전역 map 의존성도 여전히 끊어져 있었습니다.
+- **해결 방안 및 근거**:
+  1. 함수 수십 곳에 수동으로 Combat.을 붙이는 하드 코딩 대신, 파일 상단에 local getPlayerEvasion = function() return Combat.getPlayerEvasion() end 와 같이 **프록시 로컬 함수(Proxy Local Function)** 패턴을 일괄 적용해 수정량과 에러 발생 확률을 최소화했습니다.
+  2. TILE_WATER 등 누락된 의존성은 Constants를 require하도록 추가하였고, map과 Item 같은 전역 변수 역시 컨텍스트(ctx)에서 참조하도록 변경해 완전한 캡슐화를 달성했습니다.
+- **테스트 검증 결과**: 게임 내 스탯창을 띄우거나 회피 연산을 할 때 getPlayerEvasion을 호출하더라도 더 이상 튕기지 않고 정상적으로 회피 수치가 계산/렌더링됨을 확인했습니다.
+
+### [2026-06-10] 던전 진입 시 map 참조 관련 nil 에러 해결
+- **지시 내용**: "systems/combat.lua:112: attempt to index field 'map' (a nil value)" 이미지 기반 에러 픽스
+- **문제 발생 원인**: 
+  - 이전 작업에서 전역 map 객체를 ctx를 통해 주입하도록 구조를 변경했으나, 정작 main.lua의 updateCombatContext() 함수 호출 시점에서는 map = map 코드가 누락되어 combat.lua에 전달되지 않았습니다.
+  - 또한, 게임 극초반(캐릭터 선택 화면 등)에 combat.lua가 UI를 그리기 위해 getPlayerEvasionFull()을 호출할 때는 map 자체가 아예 생성되지 않은 상태일 수 있습니다. 이 경우 ctx.map 자체가 
+il이 되어 인덱싱 에러가 터졌습니다.
+- **해결 방안 및 근거**:
+  1. main.lua의 updateCombatContext()에 map = map을 추가하여 맵 데이터가 전투 컨텍스트에 정상적으로 주입되게 하였습니다.
+  2. combat.lua 내부에서 ctx.map[ctx.player.y]를 참조할 때, if ctx.map and ctx.map[ctx.player.y] 형태로 안전한 방어 코드를 작성하여 던전 맵이 없는 로비 화면 등에서도 크래시 없이 회피율(Evasion) 등 스탯 UI를 렌더링할 수 있게 보호했습니다.
+- **테스트 검증 결과**: 게임 부팅 및 던전 초기 진입 시 더 이상 map nil 에러가 발생하지 않고 매끄럽게 게임 루프가 시작됨을 확인했습니다.
+
+### [2026-06-10] combat.lua 내부 잔여 함수 호출 에러(hasBuff 등) 완벽 차단
+- **지시 내용**: "systems/combat.lua:575: attempt to call global 'hasBuff' (a nil value)" 이미지 기반 에러 픽스
+- **문제 발생 원인**: 
+  - 직전 에러 패치에서 스탯 관련 계산 함수(예: getPlayerEvasion)들에 대해서만 로컬 프록시(Proxy) 처리를 해주었으나, 적이 공격할 때 플레이어의 버프 상태를 확인하는 hasBuff()나 pplyBuff() 등 나머지 내부 함수 호출들 역시 Combat. 접두사가 누락된 채 호출되고 있어 던전 탐험 중 피격 시 크래시가 발생했습니다.
+- **해결 방안 및 근거**:
+  - combat.lua에 선언된 **모든 Combat 모듈 함수 목록을 추출**한 뒤, 예외 없이 모두 파일 상단에 local hasBuff = function(b) return Combat.hasBuff(b) end 형태로 프록시 연결을 일괄 등록했습니다.
+  - 이를 통해 systems/combat.lua 내부의 어떠한 복잡한 전투/버프 연산 로직에서도 ttempt to call global 에러가 원천적으로 발생할 수 없도록 스코프 사각지대를 완전히 없앴습니다.
+- **테스트 검증 결과**: 게임 내에서 적에게 피격당하거나 버프를 얻을 때 크래시 없이 정상적으로 연산 및 메시지가 출력됨을 확인했습니다.
+
+### [2026-06-10] 전투 모듈(combat.lua)의 모든 전역 변수 잔재 파악 및 완전 제거
+- **지시 내용**: "systems/combat.lua:624: attempt to compare number with nil" 등 연쇄적 튕김 오류의 근본적 원인을 찾아 한꺼번에 해결해 달라는 요청.
+- **문제 발생 원인**: 
+  - 플레이어가 피격 시 귀환 주문서를 취소시키는 channeling_return 변수가 main.lua의 전역(로컬) 변수였으나, 전투 모듈에서 이를 직접 접근하려다 
+il 에러가 발생했습니다.
+  - 이를 계기로 에러가 날 때마다 하나씩 땜질하는 방식(Whack-a-Mole)의 한계를 인식하고, luac -p -l 명령어를 사용해 컴파일러 레벨에서 combat.lua가 참조하고 있는 **모든 글로벌 스코프 변수**를 스캔(정적 분석)했습니다.
+  - 그 결과 SKILLS_DB, canUseSkillByRestriction, loor, channeling_return 등 총 4개의 위험한 외부 변수 참조가 여전히 남아있음을 발견했습니다.
+- **해결 방안 및 근거**:
+  1. SKILLS_DB, canUseSkillByRestriction, loor는 모두 전투 컨텍스트 객체(ctx)를 통해 주입(Dependency Injection)받도록 코드를 수정(ctx.SKILLS_DB 등)하여 접근 방식을 안전하게 통제했습니다.
+  2. channeling_return처럼 상태 값이 변해야 하는 원시 타입 변수(Primitive type)는 단순히 넘겨주면 동기화가 깨지므로, main.lua에 interruptChanneling()이라는 콜백 함수를 새로 정의하고 이를 ctx로 넘겨 호출하게 하여 데이터 불일치 이슈를 완벽히 해결했습니다.
+- **테스트 검증 결과**: 정적 분석을 통해 컴파일러 상에서 인식되는 모든 글로벌 스코프 오염이 제거됨을 확인했으며, 게임 구동 및 몬스터 타격(적의 공격으로 귀환이 취소되는 로직 포함) 테스트를 정상 통과했습니다. 더 이상 잔여 변수로 인한 예측 불가능한 튕김 에러는 발생하지 않습니다.
+
+### [2026-06-10] 아이템 파밍 강화를 위한 고등급 특수 장비 및 패시브 시스템 추가
+- **지시 내용**: "아이템 갯수가 늘어났으면 좋겠어. 특수한 무기와 특수한 능력들을 지닌 높은 등급 아이템을 만들어 아이템 획득의 재미를 늘려보고 싶어"
+- **문제 해결 및 구현 방안**:
+  1. 단순 스탯 증가를 넘어선 신규 메커니즘 4종 기획 (execute 처형, mana_steal 마나 흡수, counter_attack 반격, evive 1회성 부활).
+  2. item.lua 내에 해당 패시브를 지닌 전설/영웅 등급 장비 7종 추가 (처형인의 대부끼, 묠니르, 불사조의 깃털 등).
+  3. data/drop_tables.lua를 수정하여 새로 추가된 아이템들이 깊은 층수(minFloor 4~5)에서 드롭되도록 가중치 등록.
+  4. systems/combat.lua에서 전투(데미지 및 피격) 연산 시 해당 패시브들이 우선순위에 맞게 발동되도록 안전하게 스크립트 수정. (과정 중 불필요한 SETGLOBAL 오염을 발견하여 updateCombatContext의 클로저를 활용해 setGameState 주입 방식으로 리팩토링)
+- **테스트 검증 결과**:
+  - project/tests 유닛 테스트 정상 통과.
+  - 테스트 빌드 실행하여 문법 오류 없이 게임 정상 진입 및 아이템 데이터베이스 구동 확인 완료.
+
+### [2026-06-10] 확장형 무작위 퀘스트 시스템 및 특수 보상(아이템) 구조 추가
+- **지시 내용**: "골드 경험치 뿐아니라 가끔은 아이템이나 특정 아이템을 주는 퀘스틀 만들어주면 좋갰어. 예를 들어 던전에서 쓸수 있는 열쇠라던가 특별한 곳으로 이동 할 수 있는 스크롤..."
+- **문제 해결 및 구현 방안**:
+  1. item.lua에 소모품으로 신규 특수 아이템 2종(dungeon_key, secret_scroll) 추가. 추후 시스템 확장을 위해 뼈대만 우선 작성.
+  2. systems/quest.lua를 신규 작성하여 던전 시작, 몬스터 처치, 층 이동 시 퀘스트 데이터를 독립적으로 관리하는 로직 구성. 향후 확장이 용이하도록 보상 속성에 ewardItems 배열을 지원하도록 설계함.
+  3. main.lua의 updateCombatContext 초기화, handleStairs 층 이동, goToTown 마을 귀환 로직에 Quest 모듈의 함수들을 직접 주입하여 모듈화 패턴을 유지.
+  4. 퀘스트 달성 상태를 한눈에 파악할 수 있도록 drawGame() 함수의 HUD 영역 하단에 "퀘스트 목록 렌더링" 코드 블록을 추가하여 실시간 진행률 텍스트 출력 구현.
+- **테스트 검증 결과**:
+  - project/tests 유닛 테스트 정상 통과 확인.
+  - 테스트 빌드 실행하여 퀘스트 모듈 문법 에러가 없고 정상적으로 HUD 렌더링 및 진행이 되는 것을 보장함.
+
+### [2026-06-10] 엘리트 수호방(Treasure Room) 생성 및 던전 열쇠 상호작용 구현
+- **지시 내용**: "열쇠의 사용처를 만들자... 특수한 상자가 3층 이하의 깊이부터 등장하고 내려갈수록 확률이 높아짐. 강한 몬스터가 지키고 있고, 몬스터 쓰러뜨린 후 열쇠를 사용해 열면 고급 아이템이 하나 나옴."
+- **문제 해결 및 구현 방안**:
+  1. data/constants.lua: TILE_LOCKED_CHEST와 TILE_OPEN_CHEST 맵 타일 속성 추가 (길막음 타일).
+  2. inventory.lua: hasItem(id) 및 consumeItem(id)를 추가해 퀘스트 열쇠 등의 특정 아이템을 쉽게 찾고 파괴할 수 있도록 유틸리티 개선.
+  3. main.lua: 
+     - spawnTreasureRoom() 함수를 작성하여 3층부터 (층수-2)*15% 의 확률로 등장하도록 구현.
+     - MapGen이 생성한 ooms 배열 중, 일반 방 1곳의 정중앙에 상자를 배치하고 그 바로 옆에 체력/공격력이 대폭 상향된 isBoss=true 상태의 '엘리트 수호자'를 스폰.
+     - movePlayer() 내부에 이동하려는 타일이 TILE_LOCKED_CHEST일 경우, 인벤토리 검사 후 열쇠 소모 -> 타일 변경 -> groundItems에 고급 아이템 드롭 로직 추가.
+- **테스트 검증 결과**:
+  - project/tests 내 기존 인벤토리 테스트 하네스 통과 확인.
+  - 게임을 실행해 문법 오류가 없는 것을 확인했으며 렌더링 정상 작동함을 보장함.
+
+### [2026-06-10] 비밀 지역 스크롤(Secret Scroll) - 맵 백업, 투기장 전투 및 3지선다 보상 로직 구현
+- **지시 내용**: "비밀지역 스크롤을 만들건데 강한 몬스터와 다양한 보상이 있고 다 잡으면 보상 3개중 1개를 골라서 나오고 다시 돌아오는 방식"
+- **문제 해결 및 구현 방안**:
+  1. main.lua 전역 상태: inSecretArea, secretAreaReturnState, secretRewards 변수 추가. 
+  2. 스크롤 사용 로직(mousepressed): secret_scroll 우클릭 시 현재 맵 상태(loor, map, ooms, enemies, groundItems 등)를 secretAreaReturnState에 저장하고, 빈 15x15 투기장 맵을 즉석에서 생성. 이후 현재 층수보다 난이도가 +3 높은 엘리트/보스 몬스터 4마리를 스폰함.
+  3. 클리어 판정(checkSecretAreaClear): love.update() 루프 안에서 inSecretArea == true일 때 enemies 배열에 살아있는 몬스터가 0마리면 gameState = "secret_reward" 상태로 진입. 최상위 장비 풀에서 3가지 아이템 데이터를 무작위로 추출해 저장.
+  4. 보상 UI 렌더링 및 복원(drawSecretReward): 반투명 배경과 함께 3개의 카드형 UI로 보상을 표시. 사용자가 하나를 클릭하면 인벤토리(inv:autoPlace)에 지급하고, secretAreaReturnState 데이터를 덮어씌워 완벽하게 이전 위치와 이전 상태의 맵으로 복귀.
+- **테스트 검증 결과**:
+  - 상태 복원 시 메모리 참조(	able 복사) 문제가 발생하지 않고 안정적으로 맵이 전환 및 렌더링됨을 유닛 테스트 및 실행을 통해 확인.

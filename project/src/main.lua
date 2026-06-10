@@ -9,46 +9,58 @@ local FOV = require("fov")
 local SKILLS_DB = require("skills_db")
 local ConfigManager = require("config_manager")
 
--- ===== 설정 =====
-local TILE_SIZE = 16
-local MAP_WIDTH = 100
-local MAP_HEIGHT = 100
-local MAX_ROOMS = 25
-local MIN_ROOM_SIZE = 4
-local MAX_ROOM_SIZE = 10
-local MAX_ENEMIES_PER_ROOM = 4
-local MAX_ITEMS_PER_ROOM = 2
 
--- 스탯 포인트 배분 상태
-local statAlloc = nil   -- {points=N, sel=1}  레벨업 시 활성화
+local RacesData = require("data.races")
+local PLAYER_RACES = RacesData.PLAYER_RACES
+local RACE_RESTRICTIONS = RacesData.RACE_RESTRICTIONS
 
--- 타일 종류
-local TILE_WALL = 0
-local TILE_FLOOR = 1
-local TILE_STAIR_DOWN = 2
-local TILE_STAIR_UP = 3
-local TILE_WATER = 4
-local TILE_LAVA = 5
-local TILE_GRASS = 6
-local TILE_DIRT = 7
+local ClassesData = require("data.classes")
+local PLAYER_CLASSES = ClassesData.PLAYER_CLASSES
 
--- 색상
-local COLOR_WALL     = {0.3, 0.3, 0.4}
-local COLOR_FLOOR    = {0.6, 0.6, 0.5}
-local COLOR_WATER    = {0.1, 0.4, 0.8}
-local COLOR_LAVA     = {0.9, 0.3, 0.1}
-local COLOR_GRASS    = {0.2, 0.6, 0.3}
-local COLOR_DIRT     = {0.5, 0.4, 0.2}
-local COLOR_PLAYER   = {1, 1, 0}
-local COLOR_STAIR    = {1, 0.8, 0}
-local COLOR_HUD_BG   = {0.1, 0.1, 0.15, 0.9}
-local COLOR_HP_BAR   = {0.8, 0.1, 0.1}
-local COLOR_HP_BG    = {0.3, 0.1, 0.1}
-local COLOR_MP_BAR   = {0.15, 0.35, 0.95}
-local COLOR_MP_BG    = {0.08, 0.12, 0.3}
-local COLOR_WHITE    = {1, 1, 1}
-local COLOR_GRAY     = {0.5, 0.5, 0.5}
-local COLOR_GOLD     = {1, 0.85, 0}
+local DropData = require("data.drop_tables")
+local DROP_TABLE = DropData.DROP_TABLE
+
+local Constants = require("data.constants")
+local TILE_SIZE = Constants.TILE_SIZE
+local MAP_WIDTH = Constants.MAP_WIDTH
+local MAP_HEIGHT = Constants.MAP_HEIGHT
+local MAX_ROOMS = Constants.MAX_ROOMS
+local MIN_ROOM_SIZE = Constants.MIN_ROOM_SIZE
+local MAX_ROOM_SIZE = Constants.MAX_ROOM_SIZE
+local MAX_ENEMIES_PER_ROOM = Constants.MAX_ENEMIES_PER_ROOM
+local MAX_ITEMS_PER_ROOM = Constants.MAX_ITEMS_PER_ROOM
+
+local statAlloc = nil
+
+local TILE_WALL = Constants.TILE_WALL
+local TILE_FLOOR = Constants.TILE_FLOOR
+local TILE_STAIR_DOWN = Constants.TILE_STAIR_DOWN
+local TILE_STAIR_UP = Constants.TILE_STAIR_UP
+local TILE_WATER = Constants.TILE_WATER
+local TILE_LAVA = Constants.TILE_LAVA
+local TILE_GRASS = Constants.TILE_GRASS
+local TILE_DIRT = Constants.TILE_DIRT
+
+local COLOR_WALL = Constants.COLOR_WALL
+local COLOR_FLOOR = Constants.COLOR_FLOOR
+local COLOR_WATER = Constants.COLOR_WATER
+local COLOR_LAVA = Constants.COLOR_LAVA
+local COLOR_GRASS = Constants.COLOR_GRASS
+local COLOR_DIRT = Constants.COLOR_DIRT
+local COLOR_PLAYER = Constants.COLOR_PLAYER
+local COLOR_STAIR = Constants.COLOR_STAIR
+local COLOR_HUD_BG = Constants.COLOR_HUD_BG
+local COLOR_HP_BAR = Constants.COLOR_HP_BAR
+local COLOR_HP_BG = Constants.COLOR_HP_BG
+local COLOR_MP_BAR = Constants.COLOR_MP_BAR
+local COLOR_MP_BG = Constants.COLOR_MP_BG
+local COLOR_WHITE = Constants.COLOR_WHITE
+local COLOR_GRAY = Constants.COLOR_GRAY
+local COLOR_GOLD = Constants.COLOR_GOLD
+
+local MapGen = require("systems.map_generator")
+local Quest = require("systems.quest")
+
 
 -- 타일셋 (프로시저럴 렌더링용)
 TILESET_IMAGE = nil
@@ -71,6 +83,9 @@ local messages = {}
 local turn = 0
 local floor = 1
 local floorStates = {}
+local inSecretArea = false
+local secretAreaReturnState = nil
+local secretRewards = {}
 local font = nil
 local messageScroll = 0
 local MAX_VISIBLE_MESSAGES = 8
@@ -87,413 +102,7 @@ local charSelect = {
     chosenClass = nil,
 }
 
--- ===== 플레이어 종족 =====
-local PLAYER_RACES = {
-    {
-        id = "human", name = "인간", char = "@", color = {1, 1, 0.8},
-        desc = "균형 잡힌 종족. 모든 무기와 마법을 고르게 배울 수 있다.",
-        stats = {str=5, dex=5, int=5, con=5, lck=5},
-        resist = {},
-        weak = {},
-        profBonus = {},  -- 숙련도 보너스 없음 (균등)
-        hpBonus = 0, expBonus = 0,
-        skills = {},
-    },
-    {
-        id = "elf", name = "엘프", char = "@", color = {0.6, 0.9, 1.0},
-        desc = "마법에 뛰어난 종족. INT/DEX가 높지만 CON이 낮다.",
-        stats = {str=3, dex=7, int=8, con=3, lck=5},
-        resist = {fire=0.1, ice=0.1, lightning=0.1},
-        weak = {strike=0.2},
-        profBonus = {fire=2, ice=2, lightning=2, holy=2},
-        hpBonus = -5, expBonus = 0,
-        skills = {{id="mana_shield", name="마나 실드", desc="피격 데미지 20% 감소 (3턴)", cooldown=8, duration=3, type="buff"}},
-    },
-    {
-        id = "dwarf", name = "드워프", char = "@", color = {0.8, 0.6, 0.3},
-        desc = "강인한 대장장이 종족. STR/CON이 높고 타격/참격에 능하다.",
-        stats = {str=7, dex=4, int=3, con=8, lck=4},
-        resist = {fire=0.15, poison=0.2},
-        weak = {lightning=0.2},
-        profBonus = {strike=3, slash=2},
-        hpBonus = 10, expBonus = 0,
-        skills = {{id="stone_skin", name="바위 피부", desc="방어력 +5 (5턴)", cooldown=10, duration=5, type="buff"}},
-    },
-    {
-        id = "orc_p", name = "오크", char = "@", color = {0.5, 0.8, 0.2},
-        desc = "호전적인 전사 종족. STR이 매우 높지만 INT가 낮다.",
-        stats = {str=9, dex=4, int=2, con=6, lck=4},
-        resist = {strike=0.1},
-        weak = {holy=0.2, lightning=0.15},
-        profBonus = {strike=3, slash=2},
-        hpBonus = 5, expBonus = 0,
-        skills = {{id="war_cry", name="전쟁 함성", desc="공격력 +30% (4턴)", cooldown=10, duration=4, type="buff"}},
-    },
-    {
-        id = "halfling", name = "하플링", char = "@", color = {0.9, 0.8, 0.5},
-        desc = "작지만 민첩하고 운이 좋은 종족. DEX/LCK가 매우 높다.",
-        stats = {str=3, dex=8, int=4, con=4, lck=9},
-        resist = {poison=0.2},
-        weak = {strike=0.15},
-        profBonus = {pierce=3},
-        hpBonus = -5, expBonus = 10,
-        skills = {{id="lucky_dodge", name="행운의 회피", desc="다음 공격 100% 회피", cooldown=8, duration=1, type="buff"}},
-    },
-    {
-        id = "troll_p", name = "트롤", char = "@", color = {0.4, 0.7, 0.3},
-        desc = "강력한 재생력의 거인. STR/CON 극도로 높지만 INT/DEX가 낮다.",
-        stats = {str=10, dex=2, int=1, con=10, lck=3},
-        resist = {poison=0.3},
-        weak = {fire=0.4},
-        profBonus = {strike=4},
-        hpBonus = 20, expBonus = -10,
-        skills = {{id="regenerate", name="재생", desc="매 턴 HP 3 회복 (6턴)", cooldown=12, duration=6, type="buff"}},
-    },
-    {
-        id = "undead_p", name = "언데드", char = "@", color = {0.5, 0.7, 0.5},
-        desc = "죽음에서 돌아온 자. 독 면역, 화염/신성에 약하다.",
-        stats = {str=6, dex=4, int=6, con=6, lck=3},
-        resist = {poison=1.0, ice=0.3},
-        weak = {fire=0.4, holy=0.5},
-        profBonus = {slash=2, ice=2},
-        hpBonus = 5, expBonus = 0,
-        skills = {{id="drain_life", name="생명력 흡수", desc="적에게 데미지 + HP 흡수", cooldown=6, duration=0, type="attack", value=15}},
-    },
-    {
-        id = "dragonkin", name = "용인", char = "@", color = {1.0, 0.45, 0.15},
-        desc = "용의 피를 이은 종족. 화염에 강하고 화염 마법에 뛰어나다.",
-        stats = {str=7, dex=4, int=7, con=6, lck=3},
-        resist = {fire=0.4, slash=0.1},
-        weak = {ice=0.25},
-        profBonus = {fire=4, slash=1},
-        hpBonus = 8, expBonus = -5,
-        skills = {{id="dragon_breath", name="용의 숨결", desc="인접 적에게 강한 화염 데미지", cooldown=7, duration=0, type="attack", value=8, element="fire", attackScale=2.4}},
-    },
-    {
-        id = "fae", name = "페이", char = "@", color = {1.0, 0.55, 1.0},
-        desc = "장난스러운 요정 종족. 회피와 행운이 높지만 체력이 낮다.",
-        stats = {str=2, dex=9, int=8, con=2, lck=8},
-        resist = {holy=0.2, lightning=0.15},
-        weak = {strike=0.25},
-        profBonus = {lightning=3, holy=2},
-        hpBonus = -10, expBonus = 10,
-        skills = {{id="fae_glimmer", name="요정의 잔광", desc="회피 +18, 치명 +8 (4턴)", cooldown=9, duration=4, type="buff", statBonus={evasion=18, crit=8}}},
-    },
-    {
-        id = "gnome", name = "노움", char = "@", color = {0.7, 0.6, 1.0},
-        desc = "작고 영리한 발명가. 지능과 번개 숙련이 높다.",
-        stats = {str=3, dex=6, int=9, con=3, lck=6},
-        resist = {lightning=0.35},
-        weak = {strike=0.2},
-        profBonus = {lightning=4},
-        hpBonus = -5, expBonus = 5,
-        skills = {{id="spark_trap", name="전기 덫", desc="인접 적에게 번개 데미지", cooldown=5, duration=0, type="attack", value=4, element="lightning", attackScale=2.2}},
-    },
-    {
-        id = "kobold_p", name = "코볼트", char = "@", color = {0.85, 0.55, 0.25},
-        desc = "작지만 교활한 터널 사냥꾼. 민첩과 운이 좋다.",
-        stats = {str=4, dex=8, int=4, con=4, lck=8},
-        resist = {poison=0.15},
-        weak = {holy=0.15},
-        profBonus = {pierce=3, poison=2},
-        hpBonus = -3, expBonus = 8,
-        skills = {{id="dirty_trick", name="비열한 술수", desc="다음 공격 데미지 1.8배", cooldown=6, duration=0, type="nextAtk", value=1.8}},
-    },
-    {
-        id = "angelborn", name = "천족", char = "@", color = {1.0, 0.95, 0.65},
-        desc = "빛의 피를 타고난 종족. 신성에 강하고 독과 어둠에 흔들리지 않는다.",
-        stats = {str=5, dex=5, int=8, con=5, lck=6},
-        resist = {holy=0.5, poison=0.2},
-        weak = {fire=0.15},
-        profBonus = {holy=5},
-        hpBonus = 0, expBonus = -5,
-        skills = {{id="radiant_grace", name="찬란한 은총", desc="HP 회복", cooldown=6, duration=0, type="heal", value=10, healScale=3.5}},
-    },
-    {
-        id = "demonborn", name = "마족", char = "@", color = {0.9, 0.15, 0.25},
-        desc = "지옥의 피를 가진 종족. 화염과 독에 강하지만 신성에 약하다.",
-        stats = {str=7, dex=5, int=7, con=5, lck=3},
-        resist = {fire=0.35, poison=0.35},
-        weak = {holy=0.4},
-        profBonus = {fire=3, poison=3},
-        hpBonus = 5, expBonus = 0,
-        skills = {{id="hell_pact", name="지옥 계약", desc="공격 +8, 방어 -2 (5턴)", cooldown=10, duration=5, type="buff", statBonus={atk=8, def=-2}}},
-    },
-    {
-        id = "lizardfolk", name = "리자드맨", char = "@", color = {0.25, 0.8, 0.45},
-        desc = "습지의 사냥꾼. 체력과 독 저항이 좋다.",
-        stats = {str=6, dex=6, int=3, con=8, lck=4},
-        resist = {poison=0.45, pierce=0.1},
-        weak = {ice=0.3},
-        profBonus = {pierce=2, poison=3},
-        hpBonus = 10, expBonus = 0,
-        skills = {{id="scale_guard", name="비늘 방어", desc="방어 +7 (5턴)", cooldown=9, duration=5, type="buff", statBonus={def=7}}},
-    },
-    {
-        id = "merfolk", name = "인어", char = "@", color = {0.25, 0.85, 1.0},
-        desc = "물과 얼음에 친숙한 종족. 빙결 마법에 강하다.",
-        stats = {str=4, dex=6, int=8, con=5, lck=5},
-        resist = {ice=0.45, poison=0.1},
-        weak = {lightning=0.35},
-        profBonus = {ice=5},
-        hpBonus = 0, expBonus = 0,
-        skills = {{id="tidal_chill", name="해일 냉기", desc="인접 적에게 빙결 데미지", cooldown=5, duration=0, type="attack", value=5, element="ice", attackScale=2.1}},
-    },
-    {
-        id = "vampire", name = "흡혈귀", char = "@", color = {0.75, 0.05, 0.15},
-        desc = "피를 갈망하는 밤의 귀족. 생명 흡수에 특화됐다.",
-        stats = {str=6, dex=7, int=6, con=4, lck=5},
-        resist = {poison=0.7, ice=0.2},
-        weak = {holy=0.45, fire=0.2},
-        profBonus = {slash=2, poison=2},
-        hpBonus = -3, expBonus = 0,
-        skills = {{id="blood_drain", name="피의 흡수", desc="적에게 데미지 + HP 흡수", cooldown=5, duration=0, type="attack", value=10, element="poison", attackScale=1.8}},
-    },
-    {
-        id = "golem_p", name = "골렘", char = "@", color = {0.55, 0.55, 0.6},
-        desc = "돌과 룬으로 움직이는 존재. 매우 튼튼하지만 느리다.",
-        stats = {str=8, dex=2, int=4, con=11, lck=2},
-        resist = {poison=1.0, slash=0.25, pierce=0.25},
-        weak = {lightning=0.45, strike=0.2},
-        profBonus = {strike=4},
-        hpBonus = 25, expBonus = -10,
-        skills = {{id="rune_plate", name="룬 장갑", desc="방어 +10, 회피 -8 (6턴)", cooldown=12, duration=6, type="buff", statBonus={def=10, evasion=-8}}},
-    },
-    {
-        id = "shadowkin", name = "그림자족", char = "@", color = {0.35, 0.25, 0.55},
-        desc = "어둠 속에서 움직이는 종족. 회피와 치명이 높다.",
-        stats = {str=4, dex=9, int=6, con=3, lck=7},
-        resist = {poison=0.2},
-        weak = {holy=0.35},
-        profBonus = {pierce=3, slash=2},
-        hpBonus = -8, expBonus = 5,
-        skills = {{id="shadow_step", name="그림자 걸음", desc="회피 +25 (3턴)", cooldown=8, duration=3, type="buff", statBonus={evasion=25}}},
-    },
-    {
-        id = "sylph", name = "실프", char = "@", color = {0.75, 0.95, 1.0},
-        desc = "바람의 정령에 가까운 종족. 번개와 민첩에 강하다.",
-        stats = {str=3, dex=10, int=7, con=2, lck=6},
-        resist = {lightning=0.45},
-        weak = {strike=0.3},
-        profBonus = {lightning=4, pierce=1},
-        hpBonus = -10, expBonus = 5,
-        skills = {{id="wind_blessing", name="바람의 축복", desc="명중 +20, 회피 +15 (4턴)", cooldown=8, duration=4, type="buff", statBonus={accuracy=20, evasion=15}}},
-    },
-    {
-        id = "automaton", name = "자동인형", char = "@", color = {0.7, 0.7, 0.75},
-        desc = "태엽과 마도공학으로 움직이는 종족. 독에 면역이고 번개에 약하다.",
-        stats = {str=6, dex=5, int=6, con=8, lck=2},
-        resist = {poison=1.0, fire=0.15},
-        weak = {lightning=0.5},
-        profBonus = {strike=2, lightning=2},
-        hpBonus = 12, expBonus = -5,
-        skills = {{id="overclock", name="오버클럭", desc="공격 +5, 명중 +15 (4턴)", cooldown=9, duration=4, type="buff", statBonus={atk=5, accuracy=15}}},
-    },
-}
 
--- ===== 플레이어 직업 =====
-local PLAYER_CLASSES = {
-    {
-        id = "fighter", name = "전사", color = {1, 0.4, 0.3},
-        desc = "근접 전투의 달인. 참격/타격 무기에 능하고 방어력이 높다.",
-        statBonus = {str=3, dex=1, int=0, con=3, lck=0},
-        profBonus = {slash=3, strike=2},
-        startWeapon = "steel_sword",
-        startArmor = "chain_mail",
-        startItems = {"health_potion"},
-        skills = {{id="power_strike", name="강타", desc="다음 공격 데미지 2배", cooldown=6, duration=0, type="nextAtk", value=2.0}},
-    },
-    {
-        id = "rogue", name = "도적", color = {0.5, 1, 0.5},
-        desc = "은밀한 암살자. 찌르기 무기에 능하고 치명타가 높다.",
-        statBonus = {str=0, dex=4, int=0, con=1, lck=3},
-        profBonus = {pierce=4},
-        startWeapon = "dagger",
-        startArmor = "leather_armor",
-        startItems = {"health_potion", "health_potion"},
-        skills = {{id="backstab", name="급소 찌르기", desc="다음 공격 치명타 확정 (3배)", cooldown=8, duration=0, type="nextAtk", value=3.0}},
-    },
-    {
-        id = "mage", name = "마법사", color = {0.4, 0.6, 1},
-        desc = "원소 마법의 대가. 화염/빙결/번개 마법 무기에 능하다.",
-        statBonus = {str=0, dex=1, int=5, con=1, lck=1},
-        profBonus = {fire=3, ice=3, lightning=3},
-        startWeapon = "flame_dagger",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="fireball", name="화염구", desc="적에게 INT 기반 화염 데미지", cooldown=4, duration=0, type="attack", value=0, element="fire"}},
-    },
-    {
-        id = "paladin", name = "성기사", color = {1, 1, 0.5},
-        desc = "신의 전사. 신성 무기에 능하고 언데드/악마에 강하다.",
-        statBonus = {str=2, dex=0, int=2, con=3, lck=1},
-        profBonus = {holy=5, strike=2},
-        startWeapon = "holy_mace",
-        startArmor = "chain_mail",
-        startItems = {"health_potion"},
-        skills = {{id="holy_smite", name="신성한 강타", desc="적에게 신성 데미지 (언데드/악마 2배)", cooldown=5, duration=0, type="attack", value=0, element="holy"}},
-    },
-    {
-        id = "ranger", name = "궁수", color = {0.3, 0.8, 0.3},
-        desc = "민첩한 사냥꾼. 찌르기 무기에 능하고 회피가 높다.",
-        statBonus = {str=1, dex=4, int=1, con=1, lck=2},
-        profBonus = {pierce=4, slash=1},
-        startWeapon = "dagger",
-        startArmor = "leather_armor",
-        startItems = {"health_potion", "health_potion"},
-        skills = {{id="precise_shot", name="정밀 사격", desc="다음 공격 명중 100% + 방어 무시", cooldown=6, duration=0, type="nextAtk", value=1.5}},
-    },
-    {
-        id = "priest", name = "사제", color = {1, 1, 0.8},
-        desc = "신성한 치유사. 신성 마법에 능하고 HP 회복 능력이 뛰어나다.",
-        statBonus = {str=0, dex=1, int=4, con=3, lck=1},
-        profBonus = {holy=4, strike=1},
-        startWeapon = "holy_mace",
-        startArmor = nil,
-        startItems = {"health_potion", "health_potion", "health_potion"},
-        skills = {{id="heal", name="치유", desc="HP를 INT*3 만큼 회복", cooldown=5, duration=0, type="heal"}},
-    },
-    {
-        id = "berserker", name = "광전사", color = {1, 0.2, 0.1},
-        desc = "분노의 전사. 양손 무기에 능하고 광폭화 시 초강력 공격.",
-        statBonus = {str=5, dex=0, int=0, con=3, lck=0},
-        profBonus = {slash=3, strike=3},
-        startWeapon = "long_sword",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="berserk", name="광폭화", desc="공격력 2배, 방어 0 (5턴)", cooldown=15, duration=5, type="buff"}},
-    },
-    {
-        id = "cryomancer", name = "빙결술사", color = {0.35, 0.8, 1.0},
-        desc = "얼음 마법 전문가. 빙결 데미지와 방어형 주문에 능하다.",
-        statBonus = {str=0, dex=1, int=5, con=2, lck=0},
-        profBonus = {ice=5},
-        startWeapon = "glacier_staff",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="ice_lance", name="얼음 창", desc="적에게 강한 빙결 데미지", cooldown=4, duration=0, type="attack", value=6, element="ice", attackScale=2.4}},
-    },
-    {
-        id = "stormcaller", name = "폭풍술사", color = {1.0, 1.0, 0.35},
-        desc = "번개를 부르는 마법사. 명중과 번개 숙련이 높다.",
-        statBonus = {str=0, dex=2, int=5, con=1, lck=1},
-        profBonus = {lightning=5},
-        startWeapon = "storm_staff",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="chain_spark", name="연쇄 번개", desc="인접 적에게 번개 데미지", cooldown=4, duration=0, type="attack", value=5, element="lightning", attackScale=2.3}},
-    },
-    {
-        id = "pyromancer", name = "화염술사", color = {1.0, 0.35, 0.1},
-        desc = "화염 마법에 모든 것을 건 주문사.",
-        statBonus = {str=0, dex=1, int=6, con=1, lck=0},
-        profBonus = {fire=6},
-        startWeapon = "flame_dagger",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="inferno_bolt", name="지옥불 화살", desc="적에게 큰 화염 데미지", cooldown=5, duration=0, type="attack", value=10, element="fire", attackScale=2.5}},
-    },
-    {
-        id = "necromancer", name = "강령술사", color = {0.45, 0.8, 0.45},
-        desc = "생명력을 빼앗는 어둠의 마법사.",
-        statBonus = {str=0, dex=1, int=5, con=2, lck=1},
-        profBonus = {poison=3, ice=2},
-        startWeapon = "bone_wand",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="soul_siphon", name="영혼 착취", desc="적에게 데미지 + HP 흡수", cooldown=6, duration=0, type="attack", value=12, element="poison", attackScale=2.0}},
-    },
-    {
-        id = "monk", name = "수도승", color = {1.0, 0.75, 0.45},
-        desc = "몸과 정신을 단련한 전사. 타격과 회피에 능하다.",
-        statBonus = {str=2, dex=3, int=1, con=2, lck=1},
-        profBonus = {strike=4, holy=1},
-        startWeapon = "war_hammer",
-        startArmor = nil,
-        startItems = {"health_potion", "health_potion"},
-        skills = {{id="inner_focus", name="내면 집중", desc="명중 +20, 치명 +10 (4턴)", cooldown=8, duration=4, type="buff", statBonus={accuracy=20, crit=10}}},
-    },
-    {
-        id = "samurai", name = "검객", color = {0.9, 0.9, 0.95},
-        desc = "한 번의 베기에 집중하는 검사. 참격과 치명타에 능하다.",
-        statBonus = {str=3, dex=3, int=0, con=1, lck=1},
-        profBonus = {slash=5},
-        startWeapon = "moon_katana",
-        startArmor = "leather_armor",
-        startItems = {"health_potion"},
-        skills = {{id="iai_slash", name="발도", desc="다음 공격 데미지 2.4배", cooldown=7, duration=0, type="nextAtk", value=2.4}},
-    },
-    {
-        id = "alchemist", name = "연금술사", color = {0.4, 1.0, 0.45},
-        desc = "독과 회복 물약을 다루는 전술가.",
-        statBonus = {str=0, dex=2, int=4, con=2, lck=2},
-        profBonus = {poison=5},
-        startWeapon = "venom_blade",
-        startArmor = nil,
-        startItems = {"health_potion", "large_potion"},
-        skills = {{id="acid_flask", name="산성 플라스크", desc="적에게 독 데미지", cooldown=4, duration=0, type="attack", value=8, element="poison", attackScale=2.0}},
-    },
-    {
-        id = "druid", name = "드루이드", color = {0.35, 0.9, 0.35},
-        desc = "자연의 힘으로 회복과 독 저항을 다룬다.",
-        statBonus = {str=1, dex=1, int=4, con=3, lck=1},
-        profBonus = {poison=2, holy=2},
-        startWeapon = nil,
-        startArmor = "silk_robe",
-        startItems = {"health_potion", "health_potion"},
-        skills = {{id="nature_mend", name="자연 치유", desc="HP 대량 회복", cooldown=6, duration=0, type="heal", value=15, healScale=3.2}},
-    },
-    {
-        id = "warlock", name = "흑마법사", color = {0.6, 0.2, 0.9},
-        desc = "위험한 계약으로 폭발적인 마력을 얻는다.",
-        statBonus = {str=0, dex=1, int=6, con=0, lck=2},
-        profBonus = {fire=2, poison=3},
-        startWeapon = "bone_wand",
-        startArmor = nil,
-        startItems = {"health_potion"},
-        skills = {{id="dark_bargain", name="어둠의 거래", desc="공격 +10, 치명 +12 (4턴)", cooldown=10, duration=4, type="buff", statBonus={atk=10, crit=12}}},
-    },
-    {
-        id = "spellblade", name = "마검사", color = {0.5, 0.6, 1.0},
-        desc = "검술과 원소 마법을 함께 쓰는 전투 마법사.",
-        statBonus = {str=2, dex=2, int=3, con=1, lck=0},
-        profBonus = {slash=2, fire=2, lightning=2},
-        startWeapon = "steel_sword",
-        startArmor = "leather_armor",
-        startItems = {"health_potion"},
-        skills = {{id="arcane_edge", name="비전 칼날", desc="다음 공격 데미지 2배", cooldown=6, duration=0, type="nextAtk", value=2.0}},
-    },
-    {
-        id = "guardian", name = "수호자", color = {0.55, 0.7, 1.0},
-        desc = "방패와 방어 주문으로 버티는 탱커.",
-        statBonus = {str=1, dex=0, int=1, con=5, lck=0},
-        profBonus = {strike=2, holy=2},
-        startWeapon = "iron_shield",
-        startArmor = "chain_mail",
-        startItems = {"health_potion"},
-        skills = {{id="aegis", name="수호 방벽", desc="방어 +12, HP +15 (5턴)", cooldown=12, duration=5, type="buff", statBonus={def=12, hp=15}}},
-    },
-    {
-        id = "shaman", name = "주술사", color = {0.8, 0.55, 1.0},
-        desc = "정령의 힘으로 공격과 회복을 오간다.",
-        statBonus = {str=1, dex=1, int=4, con=2, lck=2},
-        profBonus = {lightning=2, poison=2, holy=1},
-        startWeapon = "holy_mace",
-        startArmor = nil,
-        startItems = {"health_potion", "health_potion"},
-        skills = {{id="spirit_bolt", name="영혼 화살", desc="적에게 신성 데미지", cooldown=4, duration=0, type="attack", value=6, element="holy", attackScale=2.1}},
-    },
-    {
-        id = "engineer", name = "기술자", color = {0.75, 0.75, 0.65},
-        desc = "장비와 함정을 활용하는 실용주의 전투원.",
-        statBonus = {str=1, dex=3, int=3, con=2, lck=1},
-        profBonus = {strike=2, lightning=3},
-        startWeapon = "war_hammer",
-        startArmor = "iron_helmet",
-        startItems = {"health_potion"},
-        skills = {{id="shock_mine", name="충격 지뢰", desc="인접 적에게 번개 데미지", cooldown=5, duration=0, type="attack", value=9, element="lightning", attackScale=1.8}},
-    },
-}
 
 -- 인벤토리 & 장비
 local inv = nil
@@ -515,147 +124,9 @@ local TOWN_MENU = {"상점", "보관함", "도감", "던전 출발", "저장"}
 local bestiaryScroll = 0
 local dungeonRun = 0        -- 던전 탐험 횟수
 
--- 바닥 아이템 드롭 테이블 (층별 가중치)
-local DROP_TABLE = {
-    -- 소비/재료
-    {id = "health_potion", weight = 30, minFloor = 1},
-    {id = "large_potion",  weight = 10, minFloor = 2},
-    {id = "return_scroll", weight = 15, minFloor = 1},
-    {id = "gold_coin",     weight = 25, minFloor = 1},
-    {id = "basic_torch",   weight = 15, minFloor = 1},
-    {id = "magic_lantern", weight = 5,  minFloor = 3},
-    -- 일반 무기
-    {id = "short_sword",   weight = 15, minFloor = 1},
-    {id = "rusty_sword",   weight = 18, minFloor = 1},
-    -- 고급 무기
-    {id = "dagger",        weight = 10, minFloor = 1},
-    {id = "steel_sword",   weight = 8,  minFloor = 2},
-    {id = "long_sword",    weight = 7,  minFloor = 2},
-    -- 희귀 무기
-    {id = "flame_dagger",  weight = 4,  minFloor = 3},
-    {id = "venom_blade",   weight = 4,  minFloor = 3},
-    {id = "battle_axe",    weight = 4,  minFloor = 3},
-    {id = "frost_halberd", weight = 3,  minFloor = 3},
-    -- 영웅 무기
-    {id = "vampiric_blade",     weight = 2, minFloor = 4},
-    {id = "thunder_sword",      weight = 2, minFloor = 4},
-    {id = "inferno_greatsword", weight = 2, minFloor = 4},
-    -- 희귀 무기 (추가)
-    {id = "holy_mace",     weight = 3,  minFloor = 3},
-    {id = "ice_stiletto",  weight = 3,  minFloor = 3},
-    {id = "silver_spear",  weight = 4,  minFloor = 2},
-    {id = "storm_staff",   weight = 3,  minFloor = 3},
-    {id = "glacier_staff", weight = 3,  minFloor = 3},
-    {id = "bone_wand",     weight = 3,  minFloor = 3},
-    {id = "moon_katana",   weight = 2,  minFloor = 4},
-    -- 고급 양손 (추가)
-    {id = "war_hammer",    weight = 6,  minFloor = 2},
-    -- 전설 무기
-    {id = "dragon_blade",   weight = 1, minFloor = 5},
-    {id = "soul_reaper",    weight = 1, minFloor = 5},
-    {id = "cursed_chalice", weight = 2, minFloor = 3},
-    {id = "abyssal_scythe", weight = 1, minFloor = 5},
-    -- 방패
-    {id = "wooden_shield", weight = 12, minFloor = 1},
-    {id = "iron_shield",   weight = 6,  minFloor = 2},
-    {id = "thorn_shield",  weight = 3,  minFloor = 3},
-    {id = "mirror_shield", weight = 2,  minFloor = 4},
-    {id = "dragon_shield", weight = 1,  minFloor = 5},
-    -- 방어구
-    {id = "leather_armor", weight = 12, minFloor = 1},
-    {id = "chain_mail",    weight = 6,  minFloor = 2},
-    {id = "plate_armor",   weight = 3,  minFloor = 3},
-    {id = "shadow_robe",   weight = 2,  minFloor = 4},
-    {id = "dragon_armor",  weight = 1,  minFloor = 5},
-    {id = "silk_robe",     weight = 10, minFloor = 1},
-    {id = "inferno_robe",  weight = 3,  minFloor = 3},
-    {id = "frost_mail",    weight = 3,  minFloor = 3},
-    {id = "templar_plate", weight = 2,  minFloor = 4},
-    {id = "necro_robe",    weight = 2,  minFloor = 4},
-    -- 투구
-    {id = "iron_helmet",     weight = 10, minFloor = 1},
-    {id = "mage_hat",        weight = 6,  minFloor = 2},
-    {id = "berserker_helm",  weight = 3,  minFloor = 3},
-    {id = "royal_crown",     weight = 2,  minFloor = 4},
-    {id = "dragon_helm",     weight = 1,  minFloor = 5},
-    -- 신발
-    {id = "leather_boots",  weight = 10, minFloor = 1},
-    {id = "iron_greaves",   weight = 6,  minFloor = 2},
-    {id = "swift_boots",    weight = 3,  minFloor = 3},
-    {id = "shadow_boots",   weight = 2,  minFloor = 4},
-    {id = "dragon_boots",   weight = 1,  minFloor = 5},
-    -- 반지
-    {id = "copper_ring",    weight = 8,  minFloor = 1},
-    {id = "silver_ring",    weight = 5,  minFloor = 2},
-    {id = "emerald_ring",   weight = 3,  minFloor = 3},
-    {id = "ruby_ring",      weight = 2,  minFloor = 4},
-    {id = "ring_of_power",  weight = 1,  minFloor = 5},
-    -- 목걸이
-    {id = "silver_amulet",      weight = 6, minFloor = 2},
-    {id = "healing_pendant",    weight = 3, minFloor = 3},
-    {id = "amulet_of_fury",     weight = 2, minFloor = 4},
-    {id = "amulet_of_eternity", weight = 1, minFloor = 5},
-    -- 재료
-    {id = "dragon_scale",  weight = 1,  minFloor = 5},
-}
 
 local addMessage
-
--- ===== 종족별 금기 규칙 =====
-local RACE_RESTRICTIONS = {
-    undead_p = {
-        forbiddenClasses = {paladin=true, priest=true, shaman=true, guardian=true},
-        forbiddenElements = {holy=true},
-        forbiddenItems = {holy_mace=true, soul_reaper=true, silver_spear=true, templar_plate=true},
-        reason = "언데드는 신성한 직업/마법/무기를 사용할 수 없습니다.",
-    },
-    lizardfolk = {
-        forbiddenClasses = {pyromancer=true},
-        forbiddenElements = {fire=true},
-        forbiddenItems = {inferno_robe=true},
-        reason = "리자드맨은 화염 마법과 화염 무기를 다루지 못합니다.",
-    },
-    merfolk = {
-        forbiddenClasses = {stormcaller=true},
-        forbiddenElements = {lightning=true},
-        reason = "인어는 번개 계열 힘을 피합니다.",
-    },
-    demonborn = {
-        forbiddenClasses = {paladin=true, priest=true},
-        forbiddenElements = {holy=true},
-        forbiddenItems = {holy_mace=true, silver_spear=true, templar_plate=true},
-        reason = "마족은 신성한 힘을 거부합니다.",
-    },
-    angelborn = {
-        forbiddenClasses = {necromancer=true, warlock=true},
-        forbiddenElements = {poison=true},
-        forbiddenItems = {vampiric_blade=true, abyssal_scythe=true, venom_blade=true, bone_wand=true, necro_robe=true},
-        reason = "천족은 타락/독 계열 힘을 사용할 수 없습니다.",
-    },
-    golem_p = {
-        forbiddenClasses = {rogue=true, ranger=true},
-        forbiddenItems = {leather_armor=true, shadow_robe=true, swift_boots=true, shadow_boots=true},
-        reason = "골렘은 은밀하거나 가벼운 장비 운용에 맞지 않습니다.",
-    },
-    troll_p = {
-        forbiddenClasses = {mage=true, cryomancer=true, stormcaller=true},
-        reason = "트롤은 정교한 학파 마법을 배우기 어렵습니다.",
-    },
-    vampire = {
-        forbiddenClasses = {paladin=true, priest=true},
-        forbiddenElements = {holy=true},
-        forbiddenItems = {holy_mace=true, silver_spear=true, templar_plate=true},
-        reason = "흡혈귀는 신성 계열 힘을 사용할 수 없습니다.",
-    },
-    sylph = {
-        forbiddenItems = {plate_armor=true, dragon_armor=true},
-        reason = "실프는 너무 무거운 갑옷을 입지 못합니다.",
-    },
-    fae = {
-        forbiddenItems = {war_hammer=true, battle_axe=true, inferno_greatsword=true, dragon_blade=true},
-        reason = "페이는 지나치게 무거운 무기를 다루지 못합니다.",
-    },
-}
+local updateCombatContext
 
 local function getRaceRestriction(raceId)
     return RACE_RESTRICTIONS[raceId or (player and player.raceId)] or {}
@@ -772,244 +243,7 @@ local function setPlayerAtFloorEntry(direction)
     end
 end
 
---- 드롭 테이블에서 랜덤 아이템 생성
-local function rollDrop()
-    local available = {}
-    local totalWeight = 0
-    for _, entry in ipairs(DROP_TABLE) do
-        if floor >= entry.minFloor then
-            table.insert(available, entry)
-            totalWeight = totalWeight + entry.weight
-        end
-    end
-    if #available == 0 then return nil end
 
-    local roll = math.random() * totalWeight
-    local cumulative = 0
-    for _, entry in ipairs(available) do
-        cumulative = cumulative + entry.weight
-        if roll <= cumulative then
-            local item = Item.create(entry.id)
-            if item and item.stackable then
-                if item.id == "gold_coin" then
-                    item.count = math.random(5, 15 + floor * 5)
-                elseif item.id == "health_potion" then
-                    item.count = math.random(1, 2)
-                end
-            end
-            return item
-        end
-    end
-    return nil
-end
-
--- ===== 맵 생성 =====
-local function carveRoomShape(room, shape)
-    local x, y, w, h = room.x, room.y, room.w, room.h
-    for ry = y, y + h - 1 do
-        for rx = x, x + w - 1 do
-            local carve = false
-            if shape == "rect" then
-                carve = true
-            elseif shape == "cross" then
-                carve = (math.abs(rx - room.cx) <= 1) or (math.abs(ry - room.cy) <= 1)
-            elseif shape == "round" then
-                local nx = (rx - room.cx) / math.max(1, w / 2)
-                local ny = (ry - room.cy) / math.max(1, h / 2)
-                carve = nx * nx + ny * ny <= 1.05
-            elseif shape == "chamber" then
-                carve = true
-                if math.random() < 0.18 and not (rx == room.cx and ry == room.cy) then
-                    carve = false
-                end
-            end
-
-            if carve then
-                map[ry][rx] = TILE_FLOOR
-            end
-        end
-    end
-    map[room.cy][room.cx] = TILE_FLOOR
-end
-
-local function carveCorridor(x1, y1, x2, y2)
-    if math.random() < 0.5 then
-        for cx = math.min(x1, x2), math.max(x1, x2) do
-            map[y1][cx] = TILE_FLOOR
-        end
-        for cy = math.min(y1, y2), math.max(y1, y2) do
-            map[cy][x2] = TILE_FLOOR
-        end
-    else
-        for cy = math.min(y1, y2), math.max(y1, y2) do
-            map[cy][x1] = TILE_FLOOR
-        end
-        for cx = math.min(x1, x2), math.max(x1, x2) do
-            map[y2][cx] = TILE_FLOOR
-        end
-    end
-end
-
-local function generateSpecialTerrain()
-    local terrainTypes = {}
-    if floor <= 2 then
-        terrainTypes = {TILE_GRASS, TILE_DIRT, TILE_WATER}
-    elseif floor <= 4 then
-        terrainTypes = {TILE_DIRT, TILE_WATER, TILE_LAVA}
-    else
-        terrainTypes = {TILE_LAVA, TILE_DIRT}
-    end
-
-    local tempMap = {}
-    for y = 1, MAP_HEIGHT do
-        tempMap[y] = {}
-        for x = 1, MAP_WIDTH do
-            tempMap[y][x] = map[y][x]
-            if map[y][x] == TILE_FLOOR and math.random() < 0.08 then
-                tempMap[y][x] = terrainTypes[math.random(1, #terrainTypes)]
-            end
-        end
-    end
-
-    for iter = 1, 3 do
-        local nextMap = {}
-        for y = 1, MAP_HEIGHT do
-            nextMap[y] = {}
-            for x = 1, MAP_WIDTH do
-                nextMap[y][x] = tempMap[y][x]
-                if tempMap[y][x] ~= TILE_WALL and tempMap[y][x] ~= TILE_STAIR_UP and tempMap[y][x] ~= TILE_STAIR_DOWN then
-                    local counts = {}
-                    local maxCount = 0
-                    local dominantTile = tempMap[y][x]
-                    
-                    for dy = -1, 1 do
-                        for dx = -1, 1 do
-                            local ny, nx = y + dy, x + dx
-                            if ny > 0 and ny <= MAP_HEIGHT and nx > 0 and nx <= MAP_WIDTH then
-                                local t = tempMap[ny][nx]
-                                if t ~= TILE_WALL then
-                                    counts[t] = (counts[t] or 0) + 1
-                                    if counts[t] > maxCount then
-                                        maxCount = counts[t]
-                                        dominantTile = t
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    nextMap[y][x] = dominantTile
-                end
-            end
-        end
-        tempMap = nextMap
-    end
-
-    for y = 1, MAP_HEIGHT do
-        for x = 1, MAP_WIDTH do
-            if map[y][x] == TILE_FLOOR and tempMap[y][x] ~= TILE_FLOOR then
-                map[y][x] = tempMap[y][x]
-            end
-        end
-    end
-end
-
-local function createMap()
-    map = {}
-    visibleMap = {}
-    exploredMap = {}
-    rooms = {}
-    enemies = {}
-    groundItems = {}
-
-    local biomes = {"dungeon", "forest", "ice_cave", "volcano"}
-    currentBiome = biomes[math.random(1, #biomes)]
-
-    if currentBiome == "forest" then
-        COLOR_WALL = {0.2, 0.4, 0.2}
-        COLOR_FLOOR = {0.3, 0.5, 0.3}
-    elseif currentBiome == "ice_cave" then
-        COLOR_WALL = {0.6, 0.8, 0.9}
-        COLOR_FLOOR = {0.8, 0.9, 1.0}
-    elseif currentBiome == "volcano" then
-        COLOR_WALL = {0.3, 0.1, 0.1}
-        COLOR_FLOOR = {0.4, 0.2, 0.1}
-    else
-        COLOR_WALL = {0.3, 0.3, 0.4}
-        COLOR_FLOOR = {0.6, 0.6, 0.5}
-    end
-    -- 타일셋 다시 렌더링
-    generateProceduralTileset()
-
-    for y = 1, MAP_HEIGHT do
-        map[y] = {}
-        visibleMap[y] = {}
-        exploredMap[y] = {}
-        for x = 1, MAP_WIDTH do
-            map[y][x] = TILE_WALL
-            visibleMap[y][x] = false
-            exploredMap[y][x] = false
-        end
-    end
-
-    local roomAttempts = MAX_ROOMS + math.random(0, 4)
-    for i = 1, roomAttempts do
-        local w = math.random(MIN_ROOM_SIZE, MAX_ROOM_SIZE)
-        local h = math.random(MIN_ROOM_SIZE, MAX_ROOM_SIZE)
-        local x = math.random(2, MAP_WIDTH - w - 1)
-        local y = math.random(2, MAP_HEIGHT - h - 1)
-
-        local overlap = false
-        for _, room in ipairs(rooms) do
-            if x <= room.x + room.w + 1 and x + w + 1 >= room.x and
-               y <= room.y + room.h + 1 and y + h + 1 >= room.y then
-                overlap = true
-                break
-            end
-        end
-
-        if not overlap then
-            local room = {x = x, y = y, w = w, h = h,
-                          cx = math.floor(x + w / 2),
-                          cy = math.floor(y + h / 2)}
-            local shapes = {"rect", "rect", "cross", "round", "chamber"}
-            carveRoomShape(room, shapes[math.random(1, #shapes)])
-            table.insert(rooms, room)
-
-            if #rooms > 1 then
-                local prev = rooms[#rooms - 1]
-                carveCorridor(prev.cx, prev.cy, room.cx, room.cy)
-            end
-        end
-    end
-
-    -- 가끔 떨어진 방끼리 추가 연결해 순환 구조를 만든다.
-    for _ = 1, math.random(1, 3) do
-        if #rooms >= 3 then
-            local a = rooms[math.random(1, #rooms)]
-            local b = rooms[math.random(1, #rooms)]
-            if a ~= b then
-                carveCorridor(a.cx, a.cy, b.cx, b.cy)
-            end
-        end
-    end
-
-    generateSpecialTerrain()
-
-    if #rooms > 1 then
-        local firstRoom = rooms[1]
-        local lastRoom = rooms[#rooms]
-        if floor > 1 then
-            map[firstRoom.cy][firstRoom.cx] = TILE_STAIR_UP
-            floorStates[floor] = floorStates[floor] or {}
-            floorStates[floor].upX = firstRoom.cx
-            floorStates[floor].upY = firstRoom.cy
-        end
-        map[lastRoom.cy][lastRoom.cx] = TILE_STAIR_DOWN
-        floorStates[floor] = floorStates[floor] or {}
-        floorStates[floor].downX = lastRoom.cx
-        floorStates[floor].downY = lastRoom.cy
-    end
-end
 
 local function getRandomFloorInRoom(room)
     for _ = 1, 30 do
@@ -1190,6 +424,43 @@ local function spawnBoss()
     addMessage("보스 출현: " .. btype.name)
 end
 
+local function spawnTreasureRoom()
+    if floor < 3 then return end
+    local prob = (floor - 2) * 15 -- 3층 15%, 4층 30%, 5층 45%
+    if math.random(1, 100) > prob then return end
+    if #rooms < 3 then return end
+
+    local roomIdx = math.random(2, #rooms - 1)
+    local room = rooms[roomIdx]
+
+    -- 상자 배치
+    map[room.cy][room.cx] = TILE_LOCKED_CHEST
+
+    -- 수호자 배치
+    local ex, ey = room.cx + 1, room.cy
+    if map[ey] and map[ey][ex] == TILE_WALL then ex = room.cx - 1 end
+
+    table.insert(enemies, {
+        x = ex,
+        y = ey,
+        name = "엘리트 수호자",
+        char = "G",
+        hp = 80 + floor * 15,
+        maxHp = 80 + floor * 15,
+        atk = 15 + floor * 2,
+        def = 10 + floor,
+        ev = 5,
+        spd = 1.0,
+        exp = 100 + floor * 20,
+        color = {0.8, 0.2, 0.8},
+        alive = true,
+        race = "construct",
+        atkElement = "strike",
+        isBoss = true,
+    })
+    addMessage(">> 이 층 어딘가에 강력한 수호자가 지키는 보물 상자가 있습니다! <<", {1, 0.8, 0.2})
+end
+
 -- ===== 적 생성 =====
 local function spawnEnemies()
     local available = {}
@@ -1252,9 +523,39 @@ local function spawnEnemies()
         end
     end
     spawnBoss()
+    spawnTreasureRoom()
 end
 
 -- ===== 바닥 아이템 생성 =====
+local function rollDrop()
+    local available = {}
+    local totalWeight = 0
+    for _, entry in ipairs(DROP_TABLE) do
+        if floor >= entry.minFloor then
+            table.insert(available, entry)
+            totalWeight = totalWeight + entry.weight
+        end
+    end
+    if #available == 0 then return nil end
+
+    local roll = math.random() * totalWeight
+    local cumulative = 0
+    for _, entry in ipairs(available) do
+        cumulative = cumulative + entry.weight
+        if roll <= cumulative then
+            local item = Item.create(entry.id)
+            if item and item.stackable then
+                if item.id == "gold_coin" then
+                    item.count = math.random(5, 15 + floor * 5)
+                elseif item.id == "health_potion" then
+                    item.count = math.random(1, 2)
+                end
+            end
+            return item
+        end
+    end
+end
+
 local function spawnGroundItems()
     for i = 2, #rooms do
         local room = rooms[i]
@@ -1368,608 +669,85 @@ local function initPlayer(keepStats)
             skillPoints = 0,
             unlockedSkills = {},  -- { skill_id = true }
         }
+        updateCombatContext()
     end
 end
 
-local getBuffStatBonus
+local Combat = require("systems.combat")
 
---- 장비 스탯 포함 최종 스탯 계산
-local function getPlayerAtk()
-    local bonus = equip and equip:getTotalStats().atk or 0
-    local strBonus = math.floor(player.str / 3)
-    return player.baseAtk + bonus + strBonus + getBuffStatBonus("atk")
-end
-
-local function getPlayerDef()
-    local bonus = equip and equip:getTotalStats().def or 0
-    local conBonus = math.floor(player.con / 5)
-    return player.baseDef + bonus + conBonus + getBuffStatBonus("def")
-end
-
---- 회피율 (DEX + LCK 기반)
-local function getPlayerEvasion()
-    local eqSpd = equip and equip:getTotalStats().spd or 0
-    return 5 + player.dex * 1.5 + player.lck * 0.5 + eqSpd + getBuffStatBonus("evasion")
-end
-
---- 명중률 (DEX 기반)
-local function getPlayerAccuracy()
-    return 70 + player.dex * 2 + player.lck * 0.5 + getBuffStatBonus("accuracy")
-end
-
---- 치명타 확률 (DEX + LCK 기반)
-local function getPlayerCritChance()
-    local eqCrit = equip and equip:getTotalStats().crit or 0
-    return 5 + player.dex * 0.5 + player.lck * 1.0 + eqCrit + getBuffStatBonus("crit")
-end
-
---- 치명타 배율
-local function getPlayerCritMult()
-    return 1.5 + player.str * 0.02
-end
-
---- 최대 HP (CON 기반)
-local function getPlayerMaxHp()
-    local eqHp = equip and equip:getTotalStats().hp or 0
-    local base = 30 + (player.level - 1) * 5
-    local raceHp = player.hpBonus or 0
-    return base + player.con * 3 + eqHp + raceHp + getBuffStatBonus("hp")
-end
-
-local function getPlayerMaxMana()
-    local base = 12 + player.level * 2
-    return math.max(0, base + player.int * 5 + math.floor(player.lck / 2) + getBuffStatBonus("mana"))
-end
-
-local function getPlayerManaRegen()
-    return math.max(1, 1 + math.floor(player.int / 6))
-end
-
---- 장비 패시브 효과 수집
-local function getEquipPassives()
-    local passives = {}
-    if not equip then return passives end
-    for _, item in pairs(equip.slots) do
-        if item and item.passive then
-            table.insert(passives, item.passive)
-        end
-    end
-    return passives
-end
-
---- 특정 패시브 합산
-local function getPassiveValue(pType)
-    local total = 0
-    for _, p in ipairs(getEquipPassives()) do
-        if p.type == pType then
-            total = total + p.value
-        end
-    end
-    return total
-end
-
---- 패시브 보정된 회피율
-local function getPlayerEvasionFull()
-    local ev = getPlayerEvasion() + getPassiveValue("dodge_boost")
-    if map[player.y] and map[player.y][player.x] == TILE_WATER then
-        ev = ev - 15
-    end
-    return ev
-end
-
---- 패시브 보정된 치명타
-local function getPlayerCritFull()
-    return getPlayerCritChance() + getPassiveValue("crit_boost")
-end
-
---- 장착 무기의 공격 속성
-local function getPlayerElement()
-    if not equip then return "physical" end
-    local w1 = equip:getItem("weapon1")
-    if w1 and w1.element then return w1.element end
-    return "physical"
-end
-
---- 숙련도 보너스 데미지 배율
-local function getProficiencyBonus(element)
-    if not player.proficiency then return 1.0 end
-    local prof = player.proficiency[element] or 0
-    return 1.0 + prof * 0.03  -- 숙련도 1당 3% 데미지 증가
-end
-
---- 무기 사용 시 숙련도 경험치 증가
-local function gainProficiency(element)
-    if not player.proficiency or not element or element == "physical" then return end
-    local cur = player.proficiency[element] or 0
-    if cur < 20 then  -- 최대 20
-        player.proficiency[element] = cur + 0.2
-    end
-end
-
---- 플레이어 속성 저항/약점 적용 (적 공격 → 플레이어)
-local function getPlayerElementDefense(element)
-    if not element or element == "physical" then return 1.0 end
-    if player.resist and player.resist[element] then
-        local r = player.resist[element]
-        if r >= 1.0 then return 0 end
-        return 1.0 - r
-    end
-    if player.weak and player.weak[element] then
-        return 1.0 + player.weak[element]
-    end
-    return 1.0
-end
-
---- 활성 버프 체크
-local function hasBuff(buffId)
-    if not player.buffs then return false end
-    for _, b in ipairs(player.buffs) do
-        if b.id == buffId and b.duration > 0 then return true end
-    end
-    return false
-end
-
-getBuffStatBonus = function(stat)
-    local total = 0
-    if player.buffs then
-        for _, b in ipairs(player.buffs) do
-            if b.duration > 0 and b.statBonus and b.statBonus[stat] then
-                total = total + b.statBonus[stat]
-            end
-        end
-    end
-    
-    -- 패시브 스킬 합산
-    if player.unlockedSkills and SKILLS_DB then
-        local rData = SKILLS_DB.races[player.raceId]
-        local cData = SKILLS_DB.classes[player.classId]
-        
-        local function addPassives(data)
-            if not data then return end
-            local tiers = {data.tier1, data.tier2, data.tier3}
-            for t=1, 3 do
-                if tiers[t] then
-                    for _, s in ipairs(tiers[t]) do
-                        if player.unlockedSkills[s.id] and s.statBonus then
-                            -- skills_db.lua의 key와 main.lua의 stat name 매핑
-                            local mappedKey = stat
-                            if stat == "hp" and s.statBonus.maxHp then total = total + s.statBonus.maxHp end
-                            if stat == "def" and s.statBonus.def then total = total + s.statBonus.def end
-                            if stat == "evasion" and s.statBonus.ev then total = total + s.statBonus.ev end
-                            if stat == "crit" and s.statBonus.critChance then total = total + s.statBonus.critChance end
-                            if s.statBonus[stat] then total = total + s.statBonus[stat] end
-                        end
-                    end
-                end
-            end
-        end
-        addPassives(rData)
-        addPassives(cData)
-    end
-    
-    return total
-end
-
---- 버프 적용
-local function applyBuff(buffId, name, duration, statBonus)
-    if not player.buffs then player.buffs = {} end
-    for _, b in ipairs(player.buffs) do
-        if b.id == buffId then
-            b.duration = duration
-            b.statBonus = statBonus
-            return
-        end
-    end
-    table.insert(player.buffs, {id=buffId, name=name, duration=duration, statBonus=statBonus})
-end
-
---- 버프 턴 감소
-local function tickBuffs()
-    if not player.buffs then return end
-    local newBuffs = {}
-    for _, b in ipairs(player.buffs) do
-        b.duration = b.duration - 1
-        if b.duration > 0 then
-            table.insert(newBuffs, b)
-        else
-            addMessage("  [" .. b.name .. "] 효과 종료")
-        end
-    end
-    player.buffs = newBuffs
-end
-
---- 스킬 쿨다운 감소
-local function tickSkillCooldowns()
-    if not player.skills then return end
-    for _, s in ipairs(player.skills) do
-        if s.currentCd > 0 then
-            s.currentCd = s.currentCd - 1
-        end
-    end
-end
-
-local function getSkillManaCost(skill)
-    if not skill then return 0 end
-    if skill.manaCost then return skill.manaCost end
-    if skill.type == "attack" then
-        return 7 + math.floor((skill.cooldown or 0) / 2)
-    elseif skill.type == "heal" then
-        return 10 + math.floor((skill.cooldown or 0) / 2)
-    elseif skill.type == "buff" then
-        return 6 + math.floor((skill.duration or 0) / 2)
-    elseif skill.type == "nextAtk" then
-        return 5
-    end
-    return 0
-end
-
-local function recoverMana(amount)
-    if not player.maxMana or player.maxMana <= 0 then return end
-    player.mana = math.min(player.maxMana, (player.mana or 0) + amount)
-end
-
---- 스킬 사용
-local function useSkill(skillIndex, targetEnemy)
-    if not player.skills or not player.skills[skillIndex] then return false end
-    local s = player.skills[skillIndex]
-    if not canUseSkillByRestriction(s) then return false end
-    if s.currentCd > 0 then
-        addMessage(s.name .. " 쿨다운 중! (남은 " .. s.currentCd .. "턴)")
-        return false
-    end
-    local manaCost = getSkillManaCost(s)
-    if (player.mana or 0) < manaCost then
-        addMessage(s.name .. " 사용 실패! 마나 부족 (" .. (player.mana or 0) .. "/" .. manaCost .. ")")
-        return false
-    end
-
-    s.currentCd = s.cooldown
-    player.mana = player.mana - manaCost
-
-    if s.type == "buff" then
-        applyBuff(s.id, s.name, s.duration, s.statBonus)
-        addMessage("★ " .. s.name .. " 발동! (" .. s.duration .. "턴, MP -" .. manaCost .. ")")
-        return true
-    elseif s.type == "heal" then
-        local healAmt = (s.value or 0) + math.floor(player.int * (s.healScale or 3))
-        player.hp = math.min(player.hp + healAmt, getPlayerMaxHp())
-        addMessage("★ " .. s.name .. "! HP +" .. healAmt .. " 회복! (MP -" .. manaCost .. ")")
-        return true
-    elseif s.type == "attack" then
-        if not targetEnemy then
-            addMessage("대상이 없습니다!")
-            player.mana = player.mana + manaCost
-            s.currentCd = 0
-            return false
-        end
-        local dmg = math.max(1, math.floor((s.value or 0) + player.int * (s.attackScale or 2) + player.level * 2))
-        local elem = s.element or "physical"
-        local elemMult = getElementMult(elem, targetEnemy.race)
-        if s.id == "holy_smite" and (targetEnemy.race == "undead" or targetEnemy.race == "demon") then
-            dmg = dmg * 2
-        end
-        dmg = math.max(1, math.floor(dmg * elemMult))
-        if elemMult == 0 then
-            addMessage(targetEnemy.name .. "은(는) 면역!")
-            return true
-        end
-        targetEnemy.hp = targetEnemy.hp - dmg
-        local elemName = Item.ELEMENT_NAMES[elem] or elem
-        addMessage("★ " .. s.name .. "! " .. targetEnemy.name .. "에게 " .. dmg .. " " .. elemName .. " 데미지! (MP -" .. manaCost .. ")")
-        if s.id == "drain_life" then
-            local heal = math.floor(dmg * 0.5)
-            player.hp = math.min(player.hp + heal, getPlayerMaxHp())
-            addMessage("  HP +" .. heal .. " 흡수!")
-        end
-        return true
-    elseif s.type == "nextAtk" then
-        player.nextAtkBonus = {name=s.name, mult=s.value, id=s.id}
-        addMessage("★ " .. s.name .. " 준비! 다음 공격에 적용됩니다. (MP -" .. manaCost .. ")")
-        return true
-    end
-    return false
-end
-
---- 경험치 획득 (종족 보너스 적용)
-local function gainExp(amount)
-    local bonus = player.expBonus or 0
-    local finalExp = math.max(1, math.floor(amount * (1 + bonus / 100)))
-    player.exp = player.exp + finalExp
-    return finalExp
-end
-
--- ===== 레벨업 =====
-local function checkLevelUp()
-    while player.exp >= player.nextExp do
-        player.exp = player.exp - player.nextExp
-        player.level = player.level + 1
-        player.baseAtk = player.baseAtk + 1
-        player.skillPoints = player.skillPoints + 1
-        player.nextExp = math.floor(player.nextExp * 1.5)
-
-        -- 스탯 포인트 3점 배분
-        statAlloc = {points = 3, sel = 1}
-        gameState = "levelup"
-
-        -- maxHp 재계산 + 풀HP
-        player.maxHp = getPlayerMaxHp()
-        player.hp = player.maxHp
-
-        addMessage("** 레벨 업! Lv." .. player.level .. " — 스탯 포인트 3점 및 스킬 포인트 1점 획득! **")
-    end
-end
-
--- ===== 전투 (DCSS 스타일 공식 + 패시브 효과) =====
-
---- 플레이어 → 적 한 번 공격 (내부 함수)
-local function dealPlayerAttack(enemy)
-    local accuracy = getPlayerAccuracy()
-    local hitRoll = math.random(1, 100)
-    local evade = enemy.ev or 0
-
-    -- 정밀 사격 등 다음 공격 보너스 (명중 보정)
-    local atkBonus = player.nextAtkBonus
-    if atkBonus and atkBonus.id == "precise_shot" then
-        accuracy = 999
-    end
-
-    if hitRoll > accuracy - evade then
-        addMessage(enemy.name .. "이(가) 공격을 회피했다!")
-        return 0
-    end
-
-    local atk = getPlayerAtk()
-    -- 광폭화 버프: 공격력 2배
-    if hasBuff("berserk") then atk = atk * 2 end
-    -- 전쟁 함성 버프: 공격력 +30%
-    if hasBuff("war_cry") then atk = math.floor(atk * 1.3) end
-
-    local enemyDef = enemy.def or 0
-
-    -- 방어관통 패시브
-    local armorBreak = getPassiveValue("armor_break")
-    if armorBreak > 0 then
-        enemyDef = math.floor(enemyDef * (1 - armorBreak / 100))
-    end
-    -- 정밀 사격: 방어 무시
-    if atkBonus and atkBonus.id == "precise_shot" then
-        enemyDef = 0
-    end
-
-    local dmgReduction = math.floor(enemyDef * 0.6)
-    local baseDmg = math.max(1, atk - dmgReduction)
-
-    local variance = math.floor(baseDmg * 0.2)
-    local dmg = baseDmg + math.random(-variance, variance)
-
-    -- 치명타 판정 (패시브 보정)
-    local critChance = getPlayerCritFull()
-    local isCrit = math.random(1, 100) <= critChance
-    -- 급소 찌르기: 치명타 확정
-    if atkBonus and atkBonus.id == "backstab" then
-        isCrit = true
-    end
-    if isCrit then
-        local critMult = getPlayerCritMult()
-        if atkBonus and atkBonus.id == "backstab" then critMult = 3.0 end
-        dmg = math.floor(dmg * critMult)
-    end
-    dmg = math.max(1, dmg)
-
-    -- 다음 공격 데미지 배율 (강타 등)
-    if atkBonus then
-        if atkBonus.id == "power_strike" or atkBonus.id == "precise_shot" then
-            dmg = math.floor(dmg * atkBonus.mult)
-        end
-        addMessage("  [" .. atkBonus.name .. "] 적용!")
-        player.nextAtkBonus = nil
-    end
-
-    -- 속성 상성 적용
-    local pElement = getPlayerElement()
-    local elemMult = getElementMult(pElement, enemy.race)
-    if elemMult == 0 then
-        addMessage(enemy.name .. "은(는) " .. (Item.ELEMENT_NAMES[pElement] or pElement) .. " 면역!")
-        return 0
-    end
-    dmg = math.max(1, math.floor(dmg * elemMult))
-
-    -- 숙련도 보너스 적용
-    local profMult = getProficiencyBonus(pElement)
-    dmg = math.max(1, math.floor(dmg * profMult))
-    gainProficiency(pElement)
-
-    enemy.hp = enemy.hp - dmg
-    local msg = enemy.name .. "에게 " .. dmg .. " 데미지!"
-    if isCrit then msg = "★ 치명타! " .. msg end
-    if elemMult > 1.0 then
-        msg = msg .. " (약점!)"
-    elseif elemMult < 1.0 then
-        msg = msg .. " (저항)"
-    end
-    addMessage(msg)
-
-    -- 흡혈 패시브
-    local lifesteal = getPassiveValue("lifesteal")
-    if lifesteal > 0 then
-        local heal = math.max(1, math.floor(dmg * lifesteal / 100))
-        player.hp = math.min(player.maxHp, player.hp + heal)
-        addMessage("  ♥ 흡혈 +" .. heal .. " HP")
-    end
-
-    -- 화상 패시브
-    local burnVal = getPassiveValue("burn")
-    if burnVal > 0 and math.random(1, 100) <= 35 then
-        enemy.burn = (enemy.burn or 0) + burnVal
-        addMessage("  🔥 " .. enemy.name .. " 화상! (" .. burnVal .. "턴)")
-    end
-
-    -- 독 패시브
-    local poisonVal = getPassiveValue("poison")
-    if poisonVal > 0 and math.random(1, 100) <= 25 then
-        enemy.poison = (enemy.poison or 0) + poisonVal
-        addMessage("  ☠ " .. enemy.name .. " 중독! (" .. poisonVal .. "턴)")
-    end
-
-    -- 기절 패시브
-    local stunVal = getPassiveValue("stun")
-    if stunVal > 0 and math.random(1, 100) <= stunVal then
-        enemy.stunned = true
-        addMessage("  ⚡ " .. enemy.name .. " 기절!")
-    end
-
-    return dmg
-end
-
-local function attackEnemy(enemy)
-    local totalDmg = dealPlayerAttack(enemy)
-
-    -- 연속타격 패시브
-    if enemy.alive and enemy.hp > 0 then
-        local doubleHit = getPassiveValue("double_hit")
-        if doubleHit > 0 and math.random(1, 100) <= doubleHit then
-            addMessage("  >> 연속 타격!")
-            totalDmg = totalDmg + dealPlayerAttack(enemy)
-        end
-    end
-
-    if enemy.hp <= 0 then
-        enemy.alive = false
-
-        -- 경험치 (exp_boost 패시브)
-        local expBoost = getPassiveValue("exp_boost")
-        local expGain = math.floor(enemy.exp * (1 + expBoost / 100))
-        player.exp = player.exp + expGain
-        addMessage(enemy.name .. " 처치! (+" .. expGain .. " 경험치)")
-        if enemy.isBoss then
-            addMessage("★ 보스를 쓰러뜨렸습니다! 계단이 안정되었습니다.")
-        end
-
-        -- 아이템 드롭 (40% + LCK 보정)
-        local dropChance = enemy.isBoss and 1.0 or (0.4 + player.lck * 0.01)
-        if math.random() < dropChance then
-            local drop = rollDrop()
-            if drop then
-                table.insert(groundItems, {
-                    x = enemy.x, y = enemy.y,
-                    item = drop,
-                    picked = false,
-                })
-                addMessage("  → " .. drop.name .. " 드롭!")
-            end
-        end
-
-        -- 골드 드롭 (gold_boost 패시브)
-        local goldBoost = getPassiveValue("gold_boost")
-        local goldDrop = math.random(1, 5) + floor * 2
-        if enemy.isBoss then
-            goldDrop = goldDrop + floor * 25
-        end
-        goldDrop = math.floor(goldDrop * (1 + goldBoost / 100))
-        player.gold = player.gold + goldDrop
-        addMessage("  → " .. goldDrop .. "G 획득!")
-
-        checkLevelUp()
-    end
-end
-
-local function enemyAttack(enemy)
-    -- 기절 체크
-    if enemy.stunned then
-        enemy.stunned = false
-        addMessage(enemy.name .. "은(는) 기절에서 깨어났다!")
-        return
-    end
-
-    local evasion = getPlayerEvasionFull()
-    local hitRoll = math.random(1, 100)
-    local enemyAcc = 60 + (enemy.atk or 0) * 2
-
-    -- 행운의 회피 버프
-    if hasBuff("lucky_dodge") then
-        addMessage("  ★ 행운의 회피! " .. enemy.name .. "의 공격을 피했다!")
-        return
-    end
-
-    if hitRoll > enemyAcc - evasion then
-        addMessage(enemy.name .. "의 공격을 회피했다!")
-        return
-    end
-
-    local def = getPlayerDef()
-    -- 광폭화: 방어력 0
-    if hasBuff("berserk") then def = 0 end
-    -- 바위 피부: 방어력 +5
-    if hasBuff("stone_skin") then def = def + 5 end
-    -- 마나 실드: 데미지 20% 감소 (아래에서 적용)
-
-    local dmg = math.max(1, (enemy.atk or 0) - math.floor(def * 0.6))
-    local variance = math.floor(dmg * 0.15)
-    dmg = dmg + math.random(-variance, variance)
-    dmg = math.max(1, dmg)
-
-    -- 마나 실드 데미지 감소
-    if hasBuff("mana_shield") then
-        dmg = math.max(1, math.floor(dmg * 0.8))
-    end
-
-    -- 플레이어 속성 저항/약점 적용
-    local eElem = enemy.atkElement or "physical"
-    local pDefMult = getPlayerElementDefense(eElem)
-    if pDefMult == 0 then
-        addMessage(enemy.name .. "의 " .. (Item.ELEMENT_NAMES[eElem] or eElem) .. " 공격 면역!")
-        return
-    end
-    dmg = math.max(1, math.floor(dmg * pDefMult))
-
-    player.hp = player.hp - dmg
+-- Update Context helper for main.lua to call when player/enemies change
+local function interruptChanneling()
     if channeling_return > 0 then
         channeling_return = 0
         addMessage("피격당해 귀환 주문서 시전이 취소되었습니다!", {1.0, 0.2, 0.2})
     end
-    local elemName = Item.ELEMENT_NAMES[eElem] or eElem
-    if eElem ~= "physical" then
-        local extra = ""
-        if pDefMult > 1.0 then extra = " (약점!)" end
-        if pDefMult < 1.0 then extra = " (저항)" end
-        addMessage(enemy.name .. "이(가) " .. dmg .. " " .. elemName .. " 데미지!" .. extra)
-    else
-        addMessage(enemy.name .. "이(가) " .. dmg .. " 데미지!")
-    end
-
-    -- 가시/반사 패시브
-    local thorns = getPassiveValue("thorns")
-    if thorns > 0 then
-        enemy.hp = enemy.hp - thorns
-        addMessage("  ◆ 가시 반사 " .. thorns .. " 데미지!")
-        if enemy.hp <= 0 then
-            enemy.alive = false
-            gainExp(enemy.exp)
-            addMessage(enemy.name .. " 처치! (가시 반사)")
-            checkLevelUp()
-        end
-    end
-
-    local reflect = getPassiveValue("reflect")
-    if reflect > 0 then
-        local refDmg = math.max(1, math.floor(dmg * reflect / 100))
-        enemy.hp = enemy.hp - refDmg
-        addMessage("  ◆ 반사 " .. refDmg .. " 데미지!")
-        if enemy.hp <= 0 and enemy.alive then
-            enemy.alive = false
-            gainExp(enemy.exp)
-            addMessage(enemy.name .. " 처치! (반사)")
-            checkLevelUp()
-        end
-    end
-
-    if player.hp <= 0 then
-        gameState = "gameover"
-        addMessage("** 사망했습니다! **")
-    end
 end
 
--- ===== 아이템 줍기 (인벤토리로) =====
+local function setGameState(state)
+    gameState = state
+end
+
+local function setStatAlloc(alloc)
+    statAlloc = alloc
+end
+
+updateCombatContext = function()
+    Combat.init({
+        player = player,
+        enemies = enemies,
+        equip = equip,
+        addMessage = addMessage,
+        Item = Item,
+        getElementMult = getElementMult,
+        canUseSkillByRestriction = canUseSkillByRestriction,
+        SKILLS_DB = SKILLS_DB,
+        groundItems = groundItems,
+        rollDrop = rollDrop,
+        floor = floor,
+        map = map,
+        interruptChanneling = interruptChanneling,
+        setGameState = setGameState,
+        setStatAlloc = setStatAlloc
+    })
+    Quest.init({
+        player = player,
+        inventory = inventory,
+        Item = Item,
+        addMessage = addMessage
+    })
+end
+
+local getPlayerAtk = Combat.getPlayerAtk
+local getPlayerDef = Combat.getPlayerDef
+local getPlayerEvasion = Combat.getPlayerEvasion
+local getPlayerAccuracy = Combat.getPlayerAccuracy
+local getPlayerCritChance = Combat.getPlayerCritChance
+local getPlayerCritMult = Combat.getPlayerCritMult
+local getPlayerMaxHp = Combat.getPlayerMaxHp
+local getPlayerMaxMana = Combat.getPlayerMaxMana
+local getPlayerManaRegen = Combat.getPlayerManaRegen
+local getEquipPassives = Combat.getEquipPassives
+local getPassiveValue = Combat.getPassiveValue
+local getPlayerEvasionFull = Combat.getPlayerEvasionFull
+local getPlayerCritFull = Combat.getPlayerCritFull
+local getPlayerElement = Combat.getPlayerElement
+local getProficiencyBonus = Combat.getProficiencyBonus
+local gainProficiency = Combat.gainProficiency
+local getPlayerElementDefense = Combat.getPlayerElementDefense
+local hasBuff = Combat.hasBuff
+local addPassives = Combat.addPassives
+local applyBuff = Combat.applyBuff
+local tickBuffs = Combat.tickBuffs
+local tickSkillCooldowns = Combat.tickSkillCooldowns
+local getSkillManaCost = Combat.getSkillManaCost
+local recoverMana = Combat.recoverMana
+local useSkill = Combat.useSkill
+local gainExp = Combat.gainExp
+local checkLevelUp = Combat.checkLevelUp
+local dealPlayerAttack = Combat.dealPlayerAttack
+local attackEnemy = Combat.attackEnemy
+local enemyAttack = Combat.enemyAttack
+
 local function pickupItem()
     for _, gi in ipairs(groundItems) do
         if not gi.picked and gi.x == player.x and gi.y == player.y then
@@ -2025,6 +803,7 @@ local function goToTown()
     gameState = "town"
     townMenuSel = 1
     dungeonRun = dungeonRun + 1
+    Quest.claimRewards()
     player.maxHp = getPlayerMaxHp()
     player.hp = player.maxHp
     player.maxMana = getPlayerMaxMana()
@@ -2039,8 +818,32 @@ local function startDungeon()
     turn = 0
     floorStates = {}
     gameState = "playing"
-    addMessage(">> 던전 " .. (dungeonRun + 1) .. "번째 탐험 출발! <<")
-    createMap()
+    addMessage(">> 제 " .. (dungeonRun + 1) .. "번째 탐험 시작! <<")
+    Quest.generateQuests()
+    local gen = MapGen.generate(floor)
+    map = gen.map
+    visibleMap = gen.visibleMap
+    exploredMap = gen.exploredMap
+    rooms = gen.rooms
+    COLOR_WALL = gen.colorWall
+    COLOR_FLOOR = gen.colorFloor
+    
+    if gen.stairUpX then
+        floorStates[floor] = floorStates[floor] or {}
+        floorStates[floor].upX = gen.stairUpX
+        floorStates[floor].upY = gen.stairUpY
+    end
+    if gen.stairDownX then
+        floorStates[floor] = floorStates[floor] or {}
+        floorStates[floor].downX = gen.stairDownX
+        floorStates[floor].downY = gen.stairDownY
+    end
+
+    enemies = {}
+    groundItems = {}
+
+    generateProceduralTileset()
+    updateCombatContext()
     spawnEnemies()
     spawnGroundItems()
     saveFloorState()
@@ -2069,8 +872,33 @@ local function checkStair()
             return
         end
         addMessage(">> " .. floor .. "층으로 이동 <<")
+        Quest.updateReach(floor)
+        turn = 0
         if not loadFloorState(floor) then
-            createMap()
+            local gen = MapGen.generate(floor)
+            map = gen.map
+            visibleMap = gen.visibleMap
+            exploredMap = gen.exploredMap
+            rooms = gen.rooms
+            COLOR_WALL = gen.colorWall
+            COLOR_FLOOR = gen.colorFloor
+
+            if gen.stairUpX then
+                floorStates[floor] = floorStates[floor] or {}
+                floorStates[floor].upX = gen.stairUpX
+                floorStates[floor].upY = gen.stairUpY
+            end
+            if gen.stairDownX then
+                floorStates[floor] = floorStates[floor] or {}
+                floorStates[floor].downX = gen.stairDownX
+                floorStates[floor].downY = gen.stairDownY
+            end
+
+            enemies = {}
+            groundItems = {}
+
+            generateProceduralTileset()
+            updateCombatContext()
             spawnEnemies()
             spawnGroundItems()
             saveFloorState()
@@ -2287,6 +1115,35 @@ local function movePlayer(dx, dy)
 
     if ny < 1 or ny > MAP_HEIGHT or nx < 1 or nx > MAP_WIDTH then return end
     if map[ny][nx] == TILE_WALL then return end
+    
+    if map[ny][nx] == TILE_OPEN_CHEST then
+        addMessage("이미 열려있는 빈 상자입니다.")
+        return
+    end
+
+    if map[ny][nx] == TILE_LOCKED_CHEST then
+        if inventory:hasItem("dungeon_key") then
+            inventory:consumeItem("dungeon_key")
+            map[ny][nx] = TILE_OPEN_CHEST
+            addMessage("신비한 던전 열쇠로 상자를 열었습니다!", {0.2, 1.0, 0.2})
+            
+            local highTierIds = {
+                "executioner_axe", "mjolnir", "crystal_sword", 
+                "aegis_shield", "retribution_armor", 
+                "phoenix_feather", "mana_stone_ring"
+            }
+            local dropId = highTierIds[math.random(1, #highTierIds)]
+            local itemData = Item.DATABASE[dropId]
+            if itemData then
+                local newItem = Item.new(itemData)
+                table.insert(groundItems, {x = nx, y = ny, item = newItem, picked = false})
+                addMessage("상자에서 [" .. newItem.name .. "]을(를) 발견했습니다!", {1.0, 0.8, 0.2})
+            end
+        else
+            addMessage("잠겨 있습니다. (신비한 던전 열쇠 필요)", {1.0, 0.5, 0.5})
+        end
+        return
+    end
 
     for _, enemy in ipairs(enemies) do
         if enemy.alive and enemy.x == nx and enemy.y == ny then
@@ -2317,6 +1174,7 @@ local function finishCharCreation()
     -- 인벤토리 & 장비 & 상점 & 보관함 초기화
     inv = Inventory.new(10, 6)
     equip = Equipment.new()
+    updateCombatContext()
     shop = Shop.new()
     stash = Inventory.new(10, 6)
 
@@ -2611,6 +1469,7 @@ function getItemQuadKey(item)
 end
 
 function love.load()
+    MapGen.init({addMessage = addMessage})
     love.window.setTitle("Extraction Roguelike")
     love.window.setMode(1280, 720, {resizable = false})
     
@@ -2628,8 +1487,38 @@ function love.load()
     charSelect.classSel = 1
 end
 
+local function checkSecretAreaClear()
+    if not inSecretArea or gameState ~= "playing" then return end
+    
+    local anyAlive = false
+    for _, e in ipairs(enemies) do
+        if e.alive then anyAlive = true; break end
+    end
+    
+    if not anyAlive then
+        gameState = "secret_reward"
+        addMessage("투기장의 모든 수호자를 물리쳤습니다!", {0.2, 1.0, 0.2})
+        addMessage("원하는 보상을 하나 선택하세요.", {1.0, 0.8, 0.2})
+        secretRewards = {}
+        local highTierIds = {
+            "executioner_axe", "mjolnir", "crystal_sword", 
+            "aegis_shield", "retribution_armor", 
+            "phoenix_feather", "mana_stone_ring"
+        }
+        for i=1, 3 do
+            local dropId = highTierIds[math.random(1, #highTierIds)]
+            local itemData = Item.DATABASE[dropId]
+            if itemData then
+                table.insert(secretRewards, Item.new(itemData))
+            end
+        end
+    end
+end
+
 function love.update(dt)
     if gameState == "charselect" then return end
+    if gameState == "gameover" then return end
+    checkSecretAreaClear()
     if gameState == "inventory" or gameState == "stash" or gameState == "shop" then
         if not drag.item then
             local mx, my = love.mouse.getPosition()
@@ -2984,6 +1873,48 @@ end
 function love.mousepressed(x, y, button)
     if gameState == "charselect" then return end
 
+    if gameState == "secret_reward" then
+        if button == 1 then
+            local sw = love.graphics.getWidth()
+            local sh = love.graphics.getHeight()
+            local boxW, boxH = 160, 220
+            local startX = sw/2 - (boxW * 3 + 40) / 2
+            local startY = sh/2 - boxH/2
+            
+            for i, item in ipairs(secretRewards) do
+                local bx = startX + (i-1) * (boxW + 20)
+                if x >= bx and x <= bx + boxW and y >= startY and y <= startY + boxH then
+                    if inv:autoPlace(item) then
+                        addMessage(item.name .. " 획득!", {1, 0.8, 0.2})
+                    else
+                        table.insert(groundItems, {x=player.x, y=player.y, item=item, picked=false})
+                        addMessage("인벤토리가 가득 차 바닥에 떨어졌습니다.", {1, 0.5, 0.5})
+                    end
+                    
+                    if secretAreaReturnState then
+                        floor = secretAreaReturnState.floor
+                        player.x = secretAreaReturnState.x
+                        player.y = secretAreaReturnState.y
+                        map = secretAreaReturnState.map
+                        visibleMap = secretAreaReturnState.visibleMap
+                        exploredMap = secretAreaReturnState.exploredMap
+                        rooms = secretAreaReturnState.rooms
+                        enemies = secretAreaReturnState.enemies
+                        groundItems = secretAreaReturnState.groundItems
+                        COLOR_WALL = secretAreaReturnState.colorWall
+                        COLOR_FLOOR = secretAreaReturnState.colorFloor
+                        currentBiome = secretAreaReturnState.currentBiome
+                    end
+                    inSecretArea = false
+                    secretAreaReturnState = nil
+                    gameState = "playing"
+                    return
+                end
+            end
+        end
+        return
+    end
+
     -- 스킬 트리 클릭
     if gameState == "skilltree" then
         if button == 1 and player.skillPoints > 0 then
@@ -3225,6 +2156,88 @@ function love.mousepressed(x, y, button)
                 item.count = item.count - 1
                 if item.count <= 0 then inv:removeItem(item) end
                 return
+            elseif item.id == "secret_scroll" then
+                if inSecretArea then
+                    addMessage("이곳에서는 스크롤을 사용할 수 없습니다!", {1.0, 0.5, 0.5})
+                    return
+                end
+                
+                -- 백업
+                secretAreaReturnState = {
+                    floor = floor,
+                    x = player.x,
+                    y = player.y,
+                    map = map,
+                    visibleMap = visibleMap,
+                    exploredMap = exploredMap,
+                    rooms = rooms,
+                    enemies = enemies,
+                    groundItems = groundItems,
+                    colorWall = COLOR_WALL,
+                    colorFloor = COLOR_FLOOR,
+                    currentBiome = currentBiome
+                }
+                inSecretArea = true
+                item.count = item.count - 1
+                if item.count <= 0 then inv:removeItem(item) end
+                
+                gameState = "playing"
+                addMessage("비밀 지역으로 빨려 들어갑니다!", {0.8, 0.2, 0.8})
+                
+                -- 투기장 맵 생성
+                local w, h = 15, 15
+                map = {}
+                visibleMap = {}
+                exploredMap = {}
+                rooms = {{x=2, y=2, w=11, h=11, cx=7, cy=7}}
+                COLOR_WALL = {0.2, 0.1, 0.3}
+                COLOR_FLOOR = {0.4, 0.2, 0.5}
+                for y=1, h do
+                    map[y] = {}
+                    visibleMap[y] = {}
+                    exploredMap[y] = {}
+                    for x=1, w do
+                        if y == 1 or y == h or x == 1 or x == w then
+                            map[y][x] = TILE_WALL
+                        else
+                            map[y][x] = TILE_FLOOR
+                        end
+                        visibleMap[y][x] = true
+                        exploredMap[y][x] = true
+                    end
+                end
+                
+                player.x, player.y = 7, 7
+                enemies = {}
+                groundItems = {}
+                
+                -- 강력한 몬스터 스폰 (스케일링: 현재층 + 3)
+                local elv = floor + 3
+                for i=1, 4 do
+                    local ex, ey
+                    repeat
+                        ex, ey = 7 + math.random(-4, 4), 7 + math.random(-4, 4)
+                    until ex ~= 7 or ey ~= 7
+                    
+                    table.insert(enemies, {
+                        x = ex, y = ey,
+                        name = (i==1) and "투기장 보스" or "투기장 수호자",
+                        char = (i==1) and "B" or "X",
+                        hp = (i==1) and (100 + elv * 20) or (50 + elv * 10),
+                        maxHp = (i==1) and (100 + elv * 20) or (50 + elv * 10),
+                        atk = (i==1) and (15 + elv * 3) or (10 + elv * 2),
+                        def = 5 + elv,
+                        ev = 5,
+                        spd = 1.0,
+                        exp = (i==1) and (150 + elv * 20) or (50 + elv * 10),
+                        color = (i==1) and {1, 0.1, 0.1} or {1, 0.4, 0.4},
+                        alive = true,
+                        race = "demon",
+                        atkElement = "fire",
+                        isBoss = (i==1)
+                    })
+                end
+                return
             end
             -- 장비 장착
             if item.slot then
@@ -3447,6 +2460,20 @@ local function drawGame()
                     elseif tile == TILE_WALL then
                         love.graphics.setColor(COLOR_WALL[1]*0.5, COLOR_WALL[2]*0.5, COLOR_WALL[3]*0.5)
                         love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
+                    elseif tile == TILE_LOCKED_CHEST then
+                        love.graphics.setColor(COLOR_CHEST_LOCKED)
+                        love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
+                        love.graphics.setColor(0, 0, 0, 0.5)
+                        love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
+                        love.graphics.setColor(1, 1, 1)
+                        love.graphics.print("?", sx + 5, sy + 1)
+                    elseif tile == TILE_OPEN_CHEST then
+                        love.graphics.setColor(COLOR_CHEST_OPEN)
+                        love.graphics.rectangle("fill", sx, sy, TILE_SIZE, TILE_SIZE)
+                        love.graphics.setColor(0, 0, 0, 0.5)
+                        love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
+                        love.graphics.setColor(0.5, 0.5, 0.5)
+                        love.graphics.print("_", sx + 5, sy + 1)
                     end
                 end
             end
@@ -3455,17 +2482,28 @@ local function drawGame()
     love.graphics.setColor(1, 1, 1, 1)
 
     -- 바닥 아이템
+    local t = love.timer.getTime()
     for _, gi in ipairs(groundItems) do
         if not gi.picked and visibleMap[gi.y] and visibleMap[gi.y][gi.x] then
             local sx = (gi.x - 1) * TILE_SIZE
             local sy = (gi.y - 1) * TILE_SIZE
+            
+            -- 아이템 둥둥 뜨는 애니메이션
+            local floatOffset = math.sin(t * 5 + gi.x + gi.y) * 2
+            
+            local rc = gi.item:getRarityColor()
+            
+            -- 후광 효과 (아이템 바닥에 빛남)
+            love.graphics.setColor(rc[1], rc[2], rc[3], 0.3)
+            love.graphics.circle("fill", sx + TILE_SIZE/2, sy + TILE_SIZE/2 + 2, TILE_SIZE/2 - 2)
+            love.graphics.setColor(1, 1, 1, 1)
+
             local itemKey = getItemQuadKey(gi.item)
             if ENTITY_QUADS[itemKey] and TILESET_IMAGE then
-                love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], sx, sy)
+                love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[itemKey], sx, sy + floatOffset)
             else
-                local rc = gi.item:getRarityColor()
                 love.graphics.setColor(rc[1], rc[2], rc[3])
-                love.graphics.print(gi.item.icon, sx + 3, sy)
+                love.graphics.print(gi.item.icon, sx + 3, sy + floatOffset)
             end
         end
     end
@@ -3476,14 +2514,27 @@ local function drawGame()
         if enemy.alive and visibleMap[enemy.y] and visibleMap[enemy.y][enemy.x] then
             local sx = (enemy.x - 1) * TILE_SIZE
             local sy = (enemy.y - 1) * TILE_SIZE
+            
+            -- 적 발밑 빨간/주황 그림자
+            love.graphics.setColor(0.8, 0.1, 0.1, 0.4)
+            love.graphics.ellipse("fill", sx + TILE_SIZE/2, sy + TILE_SIZE - 2, TILE_SIZE/2 - 1, 3)
+
             if enemy.isBoss then
-                love.graphics.setColor(1, 0.85, 0, 0.45)
-                love.graphics.rectangle("line", sx, sy, TILE_SIZE, TILE_SIZE)
-                love.graphics.setColor(1, 1, 1)
+                -- 보스는 더 크고 위협적인 오라
+                love.graphics.setColor(1, 0.2, 0, 0.3)
+                love.graphics.circle("fill", sx + TILE_SIZE/2, sy + TILE_SIZE/2, TILE_SIZE/2 + 4)
+                love.graphics.setColor(1, 0.85, 0, 0.8)
+                love.graphics.rectangle("line", sx-1, sy-1, TILE_SIZE+2, TILE_SIZE+2)
             end
+            love.graphics.setColor(1, 1, 1)
+
             if ENTITY_QUADS[enemy.char] and TILESET_IMAGE then
                 love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[enemy.char], sx, sy)
             else
+                -- 그림자 처리
+                love.graphics.setColor(0, 0, 0, 0.8)
+                love.graphics.print(enemy.char, sx + 4, sy + 1)
+                -- 본체
                 love.graphics.setColor(enemy.color)
                 love.graphics.print(enemy.char, sx + 3, sy)
             end
@@ -3492,12 +2543,27 @@ local function drawGame()
     end
 
     -- 플레이어
+    local px = (player.x - 1) * TILE_SIZE
+    local py = (player.y - 1) * TILE_SIZE
+    
+    -- 플레이어 스포트라이트 오라 (노란 계열)
+    love.graphics.setColor(1, 1, 0.8, 0.15)
+    love.graphics.circle("fill", px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE * 1.5)
+    love.graphics.setColor(1, 1, 0.5, 0.25)
+    love.graphics.circle("fill", px + TILE_SIZE/2, py + TILE_SIZE/2, TILE_SIZE * 0.9)
+    
+    -- 플레이어 호흡 애니메이션
+    local breath = math.sin(t * 4) * 1
+    
     if ENTITY_QUADS["@"] and TILESET_IMAGE then
-        love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS["@"], (player.x - 1) * TILE_SIZE, (player.y - 1) * TILE_SIZE)
+        love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS["@"], px, py + breath)
     else
+        love.graphics.setColor(0, 0, 0, 0.8)
+        love.graphics.print(player.char, px + 4, py + breath + 1)
         love.graphics.setColor(COLOR_PLAYER)
-        love.graphics.print(player.char, (player.x - 1) * TILE_SIZE + 3, (player.y - 1) * TILE_SIZE)
+        love.graphics.print(player.char, px + 3, py + breath)
     end
+    love.graphics.setColor(1, 1, 1)
     
     love.graphics.pop()
 
@@ -3661,6 +2727,24 @@ local function drawGame()
     hudY = hudY + 14
     love.graphics.print(">/<: 계단 | PgUp/Dn: 로그", hudX, hudY)
     hudY = hudY + 18
+
+    -- 퀘스트 표시
+    local questStrings = Quest.getActiveQuestStrings()
+    if #questStrings > 0 then
+        love.graphics.setColor(0.3, 0.8, 1)
+        love.graphics.print("--- 퀘스트 ---", hudX, hudY)
+        hudY = hudY + 16
+        for _, qs in ipairs(questStrings) do
+            if string.find(qs, "%[완료%]") then
+                love.graphics.setColor(0.5, 1, 0.5)
+            else
+                love.graphics.setColor(0.8, 0.9, 1)
+            end
+            love.graphics.print("▶ " .. qs, hudX, hudY)
+            hudY = hudY + 14
+        end
+        hudY = hudY + 6
+    end
 
     -- 인접 적 정보
     for _, enemy in ipairs(enemies) do
@@ -4550,6 +3634,59 @@ local function drawOptions()
     end
 end
 
+local function drawSecretReward()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+    
+    love.graphics.setColor(COLOR_GOLD)
+    love.graphics.printf("비밀 지역 클리어 보상", 0, sh/2 - 180, sw, "center")
+    love.graphics.setColor(COLOR_WHITE)
+    love.graphics.printf("아래 3가지 중 하나의 보상을 선택하세요.", 0, sh/2 - 140, sw, "center")
+    
+    local boxW, boxH = 160, 220
+    local startX = sw/2 - (boxW * 3 + 40) / 2
+    local startY = sh/2 - boxH/2
+    local mx, my = love.mouse.getPosition()
+    
+    for i, item in ipairs(secretRewards) do
+        local bx = startX + (i-1) * (boxW + 20)
+        
+        -- Hover effect
+        if mx >= bx and mx <= bx + boxW and my >= startY and my <= startY + boxH then
+            love.graphics.setColor(0.3, 0.3, 0.5, 0.9)
+            love.graphics.rectangle("fill", bx, startY, boxW, boxH)
+            love.graphics.setColor(COLOR_GOLD)
+            love.graphics.rectangle("line", bx, startY, boxW, boxH)
+            
+            -- Tooltip below
+            love.graphics.setColor(0, 0, 0, 0.9)
+            love.graphics.rectangle("fill", bx - 20, startY + boxH + 10, boxW + 40, 100)
+            love.graphics.setColor(COLOR_WHITE)
+            love.graphics.printf(item.desc or "", bx - 10, startY + boxH + 15, boxW + 20, "left")
+        else
+            love.graphics.setColor(0.1, 0.1, 0.2, 0.9)
+            love.graphics.rectangle("fill", bx, startY, boxW, boxH)
+            love.graphics.setColor(0.5, 0.5, 0.5)
+            love.graphics.rectangle("line", bx, startY, boxW, boxH)
+        end
+        
+        -- Item name & icon
+        local rCol = item:getRarityColor()
+        love.graphics.setColor(rCol)
+        love.graphics.printf(item.name, bx + 5, startY + 20, boxW - 10, "center")
+        
+        love.graphics.setColor(COLOR_WHITE)
+        if item.icon then
+            love.graphics.draw(item.icon, bx + boxW/2 - 16, startY + 60, 0, 2, 2)
+        end
+        
+        love.graphics.setColor(0.7, 0.7, 0.7)
+        love.graphics.printf(item:getRarityName(), bx + 5, startY + 120, boxW - 10, "center")
+    end
+end
+
 function love.draw()
     if gameState == "charselect" then
         drawCharSelect()
@@ -4570,6 +3707,9 @@ function love.draw()
     elseif gameState == "options" then
         drawGame()
         drawOptions()
+    elseif gameState == "secret_reward" then
+        drawGame()
+        drawSecretReward()
     else
         drawGame()
         if gameState == "inventory" then
