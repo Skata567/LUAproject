@@ -565,9 +565,29 @@ function Combat.attackEnemy(enemy)
 
         -- 경험치 (exp_boost 패시브)
         local expBoost = getPassiveValue("exp_boost")
-        local expGain = math.floor(enemy.exp * (1 + expBoost / 100))
-        ctx.player.exp = ctx.player.exp + expGain
-        ctx.addMessage(enemy.name .. " 처치! (+" .. expGain .. " 경험치)")
+        local totalExp = math.floor(enemy.exp * (1 + expBoost / 100))
+        local splitExp = totalExp
+        if ctx.party and #ctx.party > 0 then
+            splitExp = math.floor(totalExp / (#ctx.party + 1))
+            for _, comp in ipairs(ctx.party) do
+                if comp.alive then
+                    comp.exp = comp.exp + splitExp
+                    while comp.exp >= comp.nextExp do
+                        comp.exp = comp.exp - comp.nextExp
+                        comp.level = comp.level + 1
+                        comp.baseAtk = comp.baseAtk + 1
+                        comp.str = comp.str + 1
+                        comp.con = comp.con + 1
+                        comp.nextExp = math.floor(comp.nextExp * 1.5)
+                        comp.maxHp = 30 + (comp.level - 1) * 5 + comp.con * 3
+                        comp.hp = comp.maxHp
+                        ctx.addMessage("동료 " .. comp.name .. " 레벨 업! (Lv." .. comp.level .. ")", {1, 1, 0})
+                    end
+                end
+            end
+        end
+        ctx.player.exp = ctx.player.exp + splitExp
+        ctx.addMessage(enemy.name .. " 처치! (+" .. splitExp .. " 경험치)")
         if enemy.isBoss then
             ctx.addMessage("★ 보스를 쓰러뜨렸습니다! 계단이 안정되었습니다.")
         end
@@ -666,14 +686,36 @@ function Combat.enemyAttack(enemy)
     -- 가시/반사 패시브
     local thorns = getPassiveValue("thorns")
     if thorns > 0 then
-        enemy.hp = enemy.hp - thorns
+        e.hp = e.hp - thorns
         ctx.addMessage("  ◆ 가시 반사 " .. thorns .. " 데미지!")
-        if enemy.hp <= 0 then
-            enemy.alive = false
-            Quest.updateKill(enemy.name)
-            gainExp(enemy.exp)
-            ctx.addMessage(enemy.name .. " 처치! (가시 반사)")
-            checkLevelUp()
+        if e.hp <= 0 then
+            e.alive = false
+            Quest.updateKill(e.name)
+            
+            local totalExp = e.exp
+            local splitExp = totalExp
+            if ctx.party and #ctx.party > 0 then
+                splitExp = math.floor(totalExp / (#ctx.party + 1))
+                for _, comp in ipairs(ctx.party) do
+                    if comp.alive then
+                        comp.exp = comp.exp + splitExp
+                        while comp.exp >= comp.nextExp do
+                            comp.exp = comp.exp - comp.nextExp
+                            comp.level = comp.level + 1
+                            comp.baseAtk = comp.baseAtk + 1
+                            comp.str = comp.str + 1
+                            comp.con = comp.con + 1
+                            comp.nextExp = math.floor(comp.nextExp * 1.5)
+                            comp.maxHp = 30 + (comp.level - 1) * 5 + comp.con * 3
+                            comp.hp = comp.maxHp
+                            ctx.addMessage("동료 " .. comp.name .. " 레벨 업! (Lv." .. comp.level .. ")", {1, 1, 0})
+                        end
+                    end
+                end
+            end
+            ctx.player.exp = ctx.player.exp + splitExp
+            ctx.addMessage(e.name .. " 처치! (+" .. splitExp .. " 경험치)")
+            ctx.checkLevelUp()
         end
     end
 

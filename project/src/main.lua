@@ -60,6 +60,8 @@ local COLOR_GOLD = Constants.COLOR_GOLD
 
 local MapGen = require("systems.map_generator")
 local Quest = require("systems.quest")
+local Party = require("systems.party")
+local MercenaryShop = require("systems.mercenary_shop")
 
 
 -- 타일셋 (프로시저럴 렌더링용)
@@ -120,8 +122,29 @@ local hoverItem = nil
 local shop = nil
 local stash = nil           -- 보관함 (마을 인벤토리)
 local townMenuSel = 1       -- 마을 메뉴 선택
-local TOWN_MENU = {"상점", "보관함", "도감", "던전 출발", "저장"}
+local TOWN_MENU = {"상점", "보관함", "도감", "용병 길드", "던전 출발", "저장"}
 local bestiaryScroll = 0
+local activeInvIndex = 0
+local mercenaryList = {}
+local party = {}
+local playerInv = nil
+local playerEquip = nil
+
+local function setActiveInventory(idx)
+    activeInvIndex = idx
+    if idx == 0 then
+        if playerInv then
+            inv = playerInv
+            equip = playerEquip
+        end
+    else
+        local comp = party[idx]
+        if comp and comp.alive then
+            inv = comp.inv
+            equip = comp.equip
+        end
+    end
+end
 local dungeonRun = 0        -- 던전 탐험 횟수
 
 
@@ -707,7 +730,25 @@ updateCombatContext = function()
         map = map,
         interruptChanneling = interruptChanneling,
         setGameState = setGameState,
-        setStatAlloc = setStatAlloc
+        setStatAlloc = setStatAlloc,
+        party = party
+    })
+    Party.init({
+        player = player,
+        party = party,
+        enemies = enemies,
+        map = map,
+        addMessage = addMessage,
+        Inventory = Inventory,
+        Equipment = Equipment,
+        Item = Item,
+        checkLevelUp = Combat.checkLevelUp,
+        TILE_WALL = TILE_WALL
+    })
+    MercenaryShop.init({
+        player = player,
+        RacesData = RacesData,
+        ClassesData = ClassesData
     })
     Quest.init({
         player = player,
@@ -1064,6 +1105,11 @@ local function moveEnemies()
             end
         end
     end
+    
+    if Party and Party.takeTurns then
+        Party.takeTurns()
+        Party.removeDead()
+    end
 end
 
 function updateCamera()
@@ -1155,6 +1201,26 @@ local function movePlayer(dx, dy)
         end
     end
 
+    if party then
+        for _, comp in ipairs(party) do
+            if comp.alive and comp.x == nx and comp.y == ny then
+                comp.x = player.x
+                comp.y = player.y
+                player.x = nx
+                player.y = ny
+                addMessage(comp.name .. "와(과) 자리를 바꿨습니다.")
+                turn = turn + 1
+                pickupItem()
+                checkStair()
+                processStatusEffects()
+                moveEnemies()
+                updateFOV()
+                updateCamera()
+                return
+            end
+        end
+    end
+
     player.x = nx
     player.y = ny
     turn = turn + 1
@@ -1174,6 +1240,8 @@ local function finishCharCreation()
     -- 인벤토리 & 장비 & 상점 & 보관함 초기화
     inv = Inventory.new(10, 6)
     equip = Equipment.new()
+    playerInv = inv
+    playerEquip = equip
     updateCombatContext()
     shop = Shop.new()
     stash = Inventory.new(10, 6)
@@ -1646,6 +1714,9 @@ function love.keypressed(key)
         elseif gameState == "bestiary" then
             gameState = "town"
             return
+        elseif gameState == "mercenary_shop" then
+            gameState = "town"
+            return
         elseif gameState == "skilltree" then
             gameState = "playing"
             return
@@ -2065,6 +2136,35 @@ function love.mousepressed(x, y, button)
         return
     end
 
+    -- 용병 길드 클릭
+    if gameState == "mercenary_shop" then
+        if button == 1 then
+            local sw = love.graphics.getWidth()
+            local boxW = 800
+            local startX = sw / 2 - boxW / 2
+            local startY = 120
+            for i, merc in ipairs(mercenaryList) do
+                local y = startY + 20 + (i - 1) * 100
+                local btnX = startX + boxW - 140
+                local btnY = y + 20
+                if x >= btnX and x <= btnX + 100 and y >= btnY and y <= btnY + 40 then
+                    if player.gold >= merc.cost then
+                        local success, msg = Party.recruit(merc)
+                        if success then
+                            player.gold = player.gold - merc.cost
+                            table.remove(mercenaryList, i)
+                        end
+                        addMessage(msg)
+                    else
+                        addMessage("골드가 부족합니다!")
+                    end
+                    return
+                end
+            end
+        end
+        return
+    end
+
     -- 마을 메뉴 클릭
     if gameState == "town" then
         if button == 1 then
@@ -2093,6 +2193,9 @@ function love.mousepressed(x, y, button)
                     elseif label == "도감" then
                         gameState = "bestiary"
                         bestiaryScroll = 0
+                    elseif label == "용병 길드" then
+                        gameState = "mercenary_shop"
+                        mercenaryList = MercenaryShop.generateMercenaries()
                     elseif label == "던전 출발" then
                         startDungeon()
                     elseif label == "저장" then
@@ -2108,6 +2211,25 @@ function love.mousepressed(x, y, button)
     if gameState ~= "inventory" then return end
 
     if button == 1 then
+        -- 탭 클릭 확인
+        if y >= 10 and y <= 40 then
+            local tabW = 80
+            local tabX = 30
+            local tabs = { {idx=0} }
+            if party then
+                for i, comp in ipairs(party) do
+                    if comp.alive then table.insert(tabs, {idx=i}) end
+                end
+            end
+            for i, tab in ipairs(tabs) do
+                local tx = tabX + (i-1)*(tabW + 5)
+                if x >= tx and x <= tx + tabW then
+                    setActiveInventory(tab.idx)
+                    return
+                end
+            end
+        end
+
         local item = inv:getItemAt(x, y)
         if item then
             drag.item = item
@@ -2555,6 +2677,20 @@ local function drawGame()
     -- 플레이어 호흡 애니메이션
     local breath = math.sin(t * 4) * 1
     
+    -- 파티원
+    if party then
+        for _, comp in ipairs(party) do
+            if comp.alive and comp.x and comp.y then
+                local cx = (comp.x - 1) * TILE_SIZE
+                local cy = (comp.y - 1) * TILE_SIZE
+                love.graphics.setColor(0, 0, 0, 0.8)
+                love.graphics.print(comp.char, cx + 4, cy + breath + 1)
+                love.graphics.setColor(0.4, 0.8, 1)
+                love.graphics.print(comp.char, cx + 3, cy + breath)
+            end
+        end
+    end
+    
     if ENTITY_QUADS["@"] and TILESET_IMAGE then
         love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS["@"], px, py + breath)
     else
@@ -2715,6 +2851,35 @@ local function drawGame()
         hudY = hudY + 4
     end
 
+    -- 동료 스탯 요약
+    if party and #party > 0 then
+        love.graphics.setColor(0.4, 0.8, 1)
+        love.graphics.print("--- 동료 ---", hudX, hudY)
+        hudY = hudY + 15
+        for i, comp in ipairs(party) do
+            if comp.alive then
+                love.graphics.setColor(0.8, 0.9, 1)
+                love.graphics.print("[" .. i .. "] " .. comp.name .. " (Lv." .. comp.level .. ")", hudX, hudY)
+                hudY = hudY + 14
+                
+                -- 동료 HP 바
+                love.graphics.setColor(COLOR_HP_BG)
+                love.graphics.rectangle("fill", hudX, hudY, 120, 8)
+                love.graphics.setColor(COLOR_HP_BAR)
+                local hpRatio = math.max(0, math.min(1, comp.hp / comp.maxHp))
+                love.graphics.rectangle("fill", hudX, hudY, 120 * hpRatio, 8)
+                love.graphics.setColor(COLOR_WHITE)
+                love.graphics.print(comp.hp .. "/" .. comp.maxHp, hudX + 125, hudY - 2)
+                hudY = hudY + 14
+            else
+                love.graphics.setColor(1, 0.3, 0.3)
+                love.graphics.print("[" .. i .. "] " .. comp.name .. " (사망)", hudX, hudY)
+                hudY = hudY + 14
+            end
+        end
+        hudY = hudY + 4
+    end
+
     -- 조작법
     love.graphics.setColor(COLOR_GRAY)
     love.graphics.print("--- 조작법 ---", hudX, hudY)
@@ -2818,6 +2983,33 @@ local function drawInventory()
     local sh = love.graphics.getHeight()
     inv.x = 30
     inv.y = 50
+
+    -- 탭 그리기
+    local tabW = 80
+    local tabH = 30
+    local tabX = 30
+    local tabY = 10
+
+    local tabs = { {idx=0, name="플레이어"} }
+    if party then
+        for i, comp in ipairs(party) do
+            if comp.alive then
+                table.insert(tabs, {idx=i, name=comp.name})
+            end
+        end
+    end
+
+    for i, tab in ipairs(tabs) do
+        local x = tabX + (i-1)*(tabW + 5)
+        if activeInvIndex == tab.idx then
+            love.graphics.setColor(0.3, 0.5, 0.3)
+        else
+            love.graphics.setColor(0.2, 0.2, 0.2)
+        end
+        love.graphics.rectangle("fill", x, tabY, tabW, tabH, 4, 4)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf(tab.name, x, tabY + 8, tabW, "center")
+    end
 
     equip.x = inv.x + inv.cols * inv.cellSize + 140
     equip.y = 170
@@ -3394,6 +3586,47 @@ local function drawCharSelect()
         love.graphics.setColor(COLOR_GRAY)
         love.graphics.printf("↑↓: 선택 | Enter: 확정 | Esc: 종족 재선택", 0, sh - 25, sw, "center")
     end
+end
+
+local function drawMercenaryShop()
+    local sw = love.graphics.getWidth()
+    local sh = love.graphics.getHeight()
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, 0, sw, sh)
+
+    love.graphics.setColor(1, 0.85, 0)
+    love.graphics.printf("용병 길드 (남은 골드: " .. player.gold .. "G)", 0, 40, sw, "center")
+
+    local boxW = 800
+    local boxH = 400
+    local startX = sw / 2 - boxW / 2
+    local startY = 120
+
+    love.graphics.setColor(0.12, 0.12, 0.16, 0.9)
+    love.graphics.rectangle("fill", startX, startY, boxW, boxH, 8, 8)
+
+    for i, merc in ipairs(mercenaryList) do
+        local y = startY + 20 + (i - 1) * 100
+        love.graphics.setColor(0.2, 0.2, 0.25)
+        love.graphics.rectangle("fill", startX + 20, y, boxW - 40, 80, 5, 5)
+        
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf(merc.name .. " (Lv." .. merc.level .. ") - " .. merc.race.name .. " " .. merc.class.name, startX + 40, y + 10, boxW, "left")
+        
+        love.graphics.setColor(0.8, 0.8, 0.4)
+        love.graphics.printf("STR:" .. (merc.race.stats.str + merc.class.stats.str) .. " DEX:" .. (merc.race.stats.dex + merc.class.stats.dex) .. " INT:" .. (merc.race.stats.int + merc.class.stats.int), startX + 40, y + 35, boxW, "left")
+        
+        love.graphics.setColor(1, 0.85, 0)
+        love.graphics.printf("고용 비용: " .. merc.cost .. "G", startX + 40, y + 55, boxW, "left")
+
+        love.graphics.setColor(0.3, 0.6, 0.3)
+        love.graphics.rectangle("fill", startX + boxW - 140, y + 20, 100, 40, 4, 4)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf("고용하기", startX + boxW - 140, y + 32, 100, "center")
+    end
+
+    love.graphics.setColor(COLOR_GRAY)
+    love.graphics.printf("클릭: 고용 | Esc: 닫기", 0, sh - 30, sw, "center")
 end
 
 local function drawBestiary()
