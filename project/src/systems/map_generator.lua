@@ -256,6 +256,16 @@ local function createMap()
         stairDownX = lastRoom.cx
         stairDownY = lastRoom.cy
     end
+    
+    -- Spawn Altars
+    local altarTypes = {Constants.TILE_ALTAR_WAR, Constants.TILE_ALTAR_SHADOW, Constants.TILE_ALTAR_MAGIC}
+    if math.random() < 0.4 and #rooms > 2 then
+        local altarRoom = rooms[math.random(2, #rooms - 1)]
+        local ax, ay = getRandomFloorInRoom(altarRoom)
+        local altarType = altarTypes[math.random(1, #altarTypes)]
+        map[ay][ax] = altarType
+    end
+
     return stairUpX, stairUpY, stairDownX, stairDownY
 end
 

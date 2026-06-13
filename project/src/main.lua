@@ -50,6 +50,13 @@ local COLOR_GRASS = Constants.COLOR_GRASS
 local COLOR_DIRT = Constants.COLOR_DIRT
 local COLOR_PLAYER = Constants.COLOR_PLAYER
 local COLOR_STAIR = Constants.COLOR_STAIR
+local TILE_ALTAR_WAR = Constants.TILE_ALTAR_WAR
+local TILE_ALTAR_SHADOW = Constants.TILE_ALTAR_SHADOW
+local TILE_ALTAR_MAGIC = Constants.TILE_ALTAR_MAGIC
+local COLOR_ALTAR_WAR = Constants.COLOR_ALTAR_WAR
+local COLOR_ALTAR_SHADOW = Constants.COLOR_ALTAR_SHADOW
+local COLOR_ALTAR_MAGIC = Constants.COLOR_ALTAR_MAGIC
+
 local COLOR_HUD_BG = Constants.COLOR_HUD_BG
 local COLOR_HP_BAR = Constants.COLOR_HP_BAR
 local COLOR_HP_BG = Constants.COLOR_HP_BG
@@ -66,6 +73,7 @@ local Party = require("systems.party")
 local MercenaryShop = require("systems.mercenary_shop")
 
 local AI = require("systems.ai")
+local Religion = require("systems.religion")
 
 _G.GAME_SPEED = 0
 _G.moveTimer = 0
@@ -82,7 +90,8 @@ TILE_QUADS = {}
 ENTITY_QUADS = {}
 
 -- 게임 상태
-local gameState = "charselect" -- charselect, playing, inventory, town, shop, stash, gameover, levelup, bestiary
+local gameState = "charselect"
+local currentAltarType = nil -- charselect, playing, inventory, town, shop, stash, gameover, levelup, bestiary
 local channeling_return = 0
 local map = {}
 local visibleMap = {}
@@ -847,6 +856,8 @@ local function initPlayer(keepStats)
             weak = pWeak,
             hpBonus = race.hpBonus or 0,
             expBonus = race.expBonus or 0,
+            religion = nil,
+            piety = 0,
             buffs = {},  -- {id, name, duration, ...}
             nextAtkBonus = nil,  -- 다음 공격 보너스 (강타/급소 등)
             skillPoints = 0,
@@ -1759,6 +1770,34 @@ local function checkSecretAreaClear()
 end
 
 function love.update(dt)
+    if gameState == "altar_prompt" then
+        if key == "y" then
+            local newRel = nil
+            if currentAltarType == TILE_ALTAR_WAR then newRel = Religion.GOD_WAR
+            elseif currentAltarType == TILE_ALTAR_SHADOW then newRel = Religion.GOD_SHADOW
+            elseif currentAltarType == TILE_ALTAR_MAGIC then newRel = Religion.GOD_MAGIC end
+            
+            if player.religion and player.religion ~= newRel then
+                addMessage("배교의 대가로 신의 분노를 샀습니다!", {1.0, 0.2, 0.2})
+                player.hp = math.max(1, math.floor(player.hp * 0.5))
+                player.mana = 0
+            end
+            
+            player.religion = newRel
+            player.piety = 0
+            addMessage(Religion.NAMES[newRel] .. "의 신도가 되었습니다!", Religion.COLORS[newRel])
+            
+            player.maxHp = getPlayerMaxHp()
+            player.hp = math.min(player.hp, player.maxHp)
+            
+            gameState = "playing"
+        elseif key == "n" or key == "escape" then
+            addMessage("제단을 지나칩니다.")
+            gameState = "playing"
+        end
+        return
+    end
+
     if gameState == "charselect" then return end
     if gameState == "gameover" then return end
     checkSecretAreaClear()

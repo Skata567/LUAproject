@@ -1,6 +1,7 @@
 local Constants = require("data.constants")
 local TILE_WATER = Constants.TILE_WATER
 local Quest = require("systems.quest")
+local Religion = require("systems.religion")
 
 local Combat = {}
 
@@ -48,20 +49,23 @@ local getBuffStatBonus
 function Combat.getPlayerAtk()
     local bonus = ctx.equip and ctx.equip:getTotalStats().atk or 0
     local strBonus = math.floor(ctx.player.str / 3)
-    return ctx.player.baseAtk + bonus + strBonus + getBuffStatBonus("atk")
+    local base = ctx.player.baseAtk + bonus + strBonus + getBuffStatBonus("atk")
+    return Religion.applyAtkMod(base, ctx.player.religion)
 end
 
 function Combat.getPlayerDef()
     if Combat.hasBuff("berserk") then return 0 end
     local bonus = ctx.equip and ctx.equip:getTotalStats().def or 0
     local conBonus = math.floor(ctx.player.con / 5)
-    return ctx.player.baseDef + bonus + conBonus + getBuffStatBonus("def")
+    local base = ctx.player.baseDef + bonus + conBonus + getBuffStatBonus("def")
+    return Religion.applyDefMod(base, ctx.player.religion)
 end
 
 --- 회피율 (DEX + LCK 기반)
 function Combat.getPlayerEvasion()
     local eqSpd = ctx.equip and ctx.equip:getTotalStats().spd or 0
-    return 5 + ctx.player.dex * 1.5 + ctx.player.lck * 0.5 + eqSpd + getBuffStatBonus("evasion")
+    local base = 5 + ctx.player.dex * 1.5 + ctx.player.lck * 0.5 + eqSpd + getBuffStatBonus("evasion")
+    return Religion.applyEvasionMod(base, ctx.player.religion)
 end
 
 --- 명중률 (DEX 기반)
@@ -72,7 +76,8 @@ end
 --- 치명타 확률 (DEX + LCK 기반)
 function Combat.getPlayerCritChance()
     local eqCrit = ctx.equip and ctx.equip:getTotalStats().crit or 0
-    return 5 + ctx.player.dex * 0.5 + ctx.player.lck * 1.0 + eqCrit + getBuffStatBonus("crit")
+    local base = 5 + ctx.player.dex * 0.5 + ctx.player.lck * 1.0 + eqCrit + getBuffStatBonus("crit")
+    return Religion.applyCritMod(base, ctx.player.religion)
 end
 
 --- 치명타 배율
@@ -85,7 +90,8 @@ function Combat.getPlayerMaxHp()
     local eqHp = ctx.equip and ctx.equip:getTotalStats().hp or 0
     local base = 30 + (ctx.player.level - 1) * 5
     local raceHp = ctx.player.hpBonus or 0
-    return base + ctx.player.con * 3 + eqHp + raceHp + getBuffStatBonus("hp")
+    local finalHp = base + ctx.player.con * 3 + eqHp + raceHp + getBuffStatBonus("hp")
+    return Religion.applyHpMod(finalHp, ctx.player.religion)
 end
 
 function Combat.getPlayerMaxMana()
