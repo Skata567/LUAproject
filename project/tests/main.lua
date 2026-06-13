@@ -20,9 +20,21 @@ function love.load()
         end
     end
     
+    local test_ai = require("test_ai")
+    
+    local test_party = require("test_party")
+    
     -- 인벤토리 테스트 실행
     run(test_inventory.test_add_item, "test_inventory.test_add_item")
     run(test_inventory.test_remove_item, "test_inventory.test_remove_item")
+    
+    -- AI 테스트 실행
+    run(test_ai.test_ai_state_transitions, "test_ai.test_ai_state_transitions")
+    
+    -- 파티 테스트 실행
+    run(test_party.test_companion_movement, "test_party.test_companion_movement")
+    run(test_party.test_companion_attack, "test_party.test_companion_attack")
+    run(test_party.test_recruit_and_equip, "test_party.test_recruit_and_equip")
     
     print("=== 완료: " .. passed .. " Passed, " .. failed .. " Failed ===")
     

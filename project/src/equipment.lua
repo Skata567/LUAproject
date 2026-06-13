@@ -121,7 +121,7 @@ function Equipment:equip(item, targetSlot)
         -- 무기 외 장비
         local slotName = item.slot
         if self.slots[slotName] ~= nil or slotName == "armor" or slotName == "helmet"
-           or slotName == "boots" or slotName == "ring" or slotName == "amulet" then
+           or slotName == "boots" or slotName == "ring" or slotName == "amulet" or slotName == "torch" then
             if self.slots[slotName] then
                 table.insert(removed, self.slots[slotName])
             end

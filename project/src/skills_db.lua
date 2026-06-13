@@ -243,4 +243,14 @@ local SKILLS_DB = {
     }
 }
 
+local expanded = require("skills_db_expanded")
+if expanded then
+    for k, v in pairs(expanded.races) do
+        SKILLS_DB.races[k] = v
+    end
+    for k, v in pairs(expanded.classes) do
+        SKILLS_DB.classes[k] = v
+    end
+end
+
 return SKILLS_DB

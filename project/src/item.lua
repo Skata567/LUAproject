@@ -747,6 +747,18 @@ Item.DATABASE = {
         icon = "~", color = {1.0, 0.3, 0.3},
         stackable = true,
     }),
+    fireball_scroll = Item.new({
+        id = "fireball_scroll", name = "화염 폭발 스크롤", description = "가장 가까운 적 반경 3칸에 강력한 화염 폭발 (AoE) 피해를 입힙니다.",
+        gridW = 1, gridH = 1, rarity = "rare", slot = nil,
+        icon = "~", color = {1.0, 0.4, 0.1},
+        stackable = true,
+    }),
+    beam_scroll = Item.new({
+        id = "beam_scroll", name = "섬광 관통 스크롤", description = "가장 가까운 적 방향으로 일직선의 모든 적을 관통하는 광선을 발사합니다.",
+        gridW = 1, gridH = 1, rarity = "rare", slot = nil,
+        icon = "~", color = {1.0, 1.0, 0.5},
+        stackable = true,
+    }),
 
     -- =============================================
     -- 재료

@@ -8,6 +8,7 @@ local Shop = require("shop")
 local FOV = require("fov")
 local SKILLS_DB = require("skills_db")
 local ConfigManager = require("config_manager")
+local utf8 = require("utf8")
 
 
 local RacesData = require("data.races")
@@ -58,11 +59,22 @@ local COLOR_WHITE = Constants.COLOR_WHITE
 local COLOR_GRAY = Constants.COLOR_GRAY
 local COLOR_GOLD = Constants.COLOR_GOLD
 
+local Combat = require("systems.combat")
 local MapGen = require("systems.map_generator")
 local Quest = require("systems.quest")
 local Party = require("systems.party")
 local MercenaryShop = require("systems.mercenary_shop")
 
+local AI = require("systems.ai")
+
+_G.GAME_SPEED = 0
+_G.moveTimer = 0
+_G.moveDelay = 0.2
+_G.heldAction = nil
+
+math.randomseed(os.time())
+math.random()
+math.random()
 
 -- 타일셋 (프로시저럴 렌더링용)
 TILESET_IMAGE = nil
@@ -147,6 +159,142 @@ local function setActiveInventory(idx)
 end
 local dungeonRun = 0        -- 던전 탐험 횟수
 
+-- ===== 개발자 콘솔 상태 =====
+local showConsole = false
+local consoleInput = ""
+local consoleLogs = {}
+
+local function addConsoleLog(msg)
+    table.insert(consoleLogs, msg)
+    if #consoleLogs > 15 then table.remove(consoleLogs, 1) end
+end
+
+local function executeConsoleCommand(cmdStr)
+    addConsoleLog("> " .. cmdStr)
+    local args = {}
+    for w in string.gmatch(cmdStr, "%S+") do table.insert(args, w) end
+    if #args == 0 then return end
+    local cmd = args[1]:lower()
+
+    if cmd == "/coin" then
+        local amt = tonumber(args[2]) or 1000
+        player.gold = player.gold + amt
+        addConsoleLog("골드를 " .. amt .. " 만큼 획득했습니다.")
+    elseif cmd == "/getitem" then
+        local id = args[2]
+        local amt = tonumber(args[3]) or 1
+        if not id or not Item.ITEMS[id] then
+            addConsoleLog("오류: 존재하지 않는 아이템 ID 입니다.")
+            return
+        end
+        local given = 0
+        for i=1, amt do
+            local item = Item.new(id)
+            if inv:autoPlace(item) then given = given + 1 end
+        end
+        addConsoleLog(Item.ITEMS[id].name .. " " .. given .. "개 획득했습니다.")
+    elseif cmd == "/clearinv" then
+        for i=1, inv.cols do
+            for j=1, inv.rows do
+                inv.grid[j][i] = nil
+            end
+        end
+        addConsoleLog("인벤토리를 비웠습니다.")
+    elseif cmd == "/heal" then
+        player.hp = Combat.getPlayerMaxHp()
+        player.mana = Combat.getPlayerMaxMana()
+        if party then
+            for _, comp in ipairs(party) do
+                if comp.alive then comp.hp = comp.maxHp end
+            end
+        end
+        addConsoleLog("파티 전원 HP/MP 100 회복!")
+    elseif cmd == "/level" then
+        local amt = tonumber(args[2]) or 1
+        for i=1, amt do
+            player.level = player.level + 1
+            player.baseAtk = player.baseAtk + 1
+            player.skillPoints = (player.skillPoints or 0) + 1
+            player.statPoints = (player.statPoints or 0) + 3
+        end
+        addConsoleLog("레벨이 " .. amt .. " 만큼 상승했습니다! (현재: " .. player.level .. ")")
+    elseif cmd == "/floor" then
+        local amt = tonumber(args[2])
+        if amt then
+            floor = amt - 1
+            gameState = "playing"
+            nextFloor()
+            addConsoleLog("강제로 " .. amt .. " 층으로 이동합니다.")
+        end
+    elseif cmd == "/spawn" then
+        local id = args[2]
+        if not id then
+            addConsoleLog("오류: 몬스터 이름을 입력하세요.")
+            return
+        end
+        local etype = nil
+        for _, e in ipairs(ENEMY_DB) do
+            if e.name == id or e.char == id then
+                etype = e
+                break
+            end
+        end
+        if not etype then
+            addConsoleLog("오류: 존재하지 않는 몬스터 이름입니다.")
+            return
+        end
+        local mx, my = love.mouse.getPosition()
+        local tx = math.floor((mx + camera.x) / TILE_SIZE)
+        local ty = math.floor((my + camera.y) / TILE_SIZE)
+        if map[ty] and map[ty][tx] then
+            local scale = 1 + (floor - 1) * 0.15
+            local hpVal  = math.floor(etype.hp * scale)
+            local atkVal = math.floor(etype.atk * scale)
+            local defVal = math.floor(etype.def * scale)
+            
+            table.insert(enemies, {
+                x = tx, y = ty,
+                name = etype.name, char = etype.char,
+                hp = hpVal, maxHp = hpVal,
+                atk = atkVal, def = defVal,
+                ev = etype.ev, spd = etype.spd or 1.0,
+                exp = math.floor(etype.exp * scale),
+                color = etype.color, alive = true,
+                race = etype.race or "human",
+                atkElement = etype.atkElement or "physical"
+            })
+            addConsoleLog(etype.name .. " 몬스터를 커서 위치에 소환했습니다!")
+        else
+            addConsoleLog("오류: 올바르지 않은 위치입니다.")
+        end
+    elseif cmd == "/god" then
+        player.godMode = not player.godMode
+        addConsoleLog("무적 모드: " .. (player.godMode and "ON" or "OFF"))
+    elseif cmd == "/clear" then
+        consoleLogs = {}
+    elseif cmd == "/help" then
+        addConsoleLog("=== 명령어 도움말 ===")
+        addConsoleLog("/coin [숫자] : 골드 획득 (기본 1000)")
+        addConsoleLog("/getitem [아이템ID] [수량] : 아이템 획득")
+        addConsoleLog("/heal : 파티 전원 HP/MP 회복")
+        addConsoleLog("/level [숫자] : 레벨 업")
+        addConsoleLog("/floor [숫자] : 특정 층으로 이동")
+        addConsoleLog("/spawn [이름] : 커서 위치에 몬스터 소환")
+        addConsoleLog("/god : 무적 모드 토글")
+        addConsoleLog("/clearinv : 인벤토리 비우기")
+        addConsoleLog("/clear : 콘솔 로그 지우기")
+    else
+        addConsoleLog("알 수 없는 명령어입니다. (도움말: /help)")
+    end
+end
+
+function love.textinput(t)
+    if showConsole then
+        consoleInput = consoleInput .. t
+    end
+end
+
+
 
 local addMessage
 local updateCombatContext
@@ -203,9 +351,11 @@ local function canUseSkillByRestriction(skill)
 end
 
 local function canEquipItemByRestriction(item)
-    local blocked, reason = isItemForbiddenForRace(player and player.raceId, item)
+    local targetEntity = activeInvIndex == 0 and player or (party and party[activeInvIndex])
+    local rId = targetEntity and targetEntity.raceId or (player and player.raceId)
+    local blocked, reason = isItemForbiddenForRace(rId, item)
     if blocked then
-        addMessage(reason or "이 종족은 해당 장비를 사용할 수 없습니다.")
+        addMessage(reason or "이 대상은 해당 장비를 사용할 수 없습니다.")
         return false
     end
     return true
@@ -381,7 +531,7 @@ end
 -- ===== 몬스터 데이터베이스 (DCSS 스타일 + 종족) =====
 local ENEMY_DB = {
     -- 1층: 약한 적
-    {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}, race="beast", atkElement="pierce"},
+    {name="쥐",         char="r", hp=3,  atk=1, def=0, spd=1.2, exp=3,  ev=15, color={0.5,0.4,0.3}, floors={1,2}, race="beast", atkElement="pierce", aiType="coward"},
     {name="고블린",      char="g", hp=6,  atk=2, def=0, spd=1.0, exp=6,  ev=10, color={0,0.8,0},     floors={1,2,3}, race="goblinoid", atkElement="slash"},
     {name="코볼트",      char="k", hp=5,  atk=2, def=1, spd=1.1, exp=5,  ev=12, color={0.6,0.5,0.2}, floors={1,2}, race="goblinoid", atkElement="pierce", biomes={"dungeon", "forest"}},
     {name="박쥐",        char="b", hp=3,  atk=1, def=0, spd=1.5, exp=3,  ev=25, color={0.4,0.3,0.5}, floors={1,2,3}, race="beast", atkElement="pierce", biomes={"dungeon", "ice_cave"}},
@@ -397,16 +547,16 @@ local ENEMY_DB = {
     {name="가고일",      char="G", hp=20, atk=5, def=8, spd=0.6, exp=22, ev=3,  color={0.5,0.5,0.5}, floors={3,4}, race="construct", atkElement="strike", biomes={"dungeon", "volcano"}},
     {name="리자드맨",    char="L", hp=18, atk=6, def=4, spd=1.1, exp=20, ev=12, color={0.2,0.6,0.4}, floors={3,4}, race="reptile", atkElement="slash", biomes={"forest", "ice_cave"}},
     {name="미노타우로스",char="M", hp=30, atk=8, def=4, spd=1.0, exp=30, ev=6,  color={0.6,0.3,0.1}, floors={3,4,5}, race="beast", atkElement="strike"},
-    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}, race="human", atkElement="fire", biomes={"dungeon", "ice_cave"}},
+    {name="워록",        char="W", hp=15, atk=9, def=2, spd=0.8, exp=28, ev=10, color={0.5,0.2,0.7}, floors={3,4,5}, race="human", atkElement="fire", biomes={"dungeon", "ice_cave"}, aiType="mage"},
     -- 4층: 엘리트
     {name="오우거",      char="F", hp=35, atk=10,def=5, spd=0.6, exp=35, ev=3,  color={0.7,0.4,0.2}, floors={4,5}, race="troll", atkElement="strike", biomes={"forest", "volcano"}},
-    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}, race="elf", atkElement="lightning", biomes={"dungeon", "forest"}},
-    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}, race="human", atkElement="poison", biomes={"dungeon", "ice_cave"}},
+    {name="다크엘프",    char="e", hp=20, atk=8, def=3, spd=1.3, exp=30, ev=20, color={0.3,0.2,0.5}, floors={4,5}, race="elf", atkElement="lightning", biomes={"dungeon", "forest"}, aiType="assassin"},
+    {name="네크로맨서",  char="N", hp=22, atk=10,def=3, spd=0.9, exp=35, ev=12, color={0.4,0.1,0.4}, floors={4,5}, race="human", atkElement="poison", biomes={"dungeon", "ice_cave"}, aiType="mage"},
     {name="석상",        char="X", hp=40, atk=6, def=12,spd=0.4, exp=30, ev=0,  color={0.6,0.6,0.65},floors={4,5}, race="construct", atkElement="strike", biomes={"dungeon", "volcano"}},
     {name="화염마",      char="E", hp=25, atk=12,def=4, spd=1.0, exp=40, ev=15, color={1.0,0.3,0.1}, floors={4,5}, race="demon", atkElement="fire", biomes={"volcano"}},
     -- 5층: 보스급
     {name="드래곤",      char="D", hp=60, atk=15,def=8, spd=0.8, exp=80, ev=10, color={1,0.2,0},     floors={5}, race="dragon", atkElement="fire", biomes={"volcano"}},
-    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}, race="undead", atkElement="ice", biomes={"ice_cave"}},
+    {name="리치",        char="$", hp=40, atk=14,def=5, spd=0.7, exp=70, ev=12, color={0.3,0.8,0.3}, floors={5}, race="undead", atkElement="ice", biomes={"ice_cave"}, aiType="mage"},
     {name="골렘",        char="#", hp=70, atk=12,def=15,spd=0.3, exp=60, ev=0,  color={0.5,0.4,0.3}, floors={5}, race="construct", atkElement="strike", biomes={"dungeon"}},
     {name="악마",        char="&", hp=50, atk=16,def=6, spd=1.2, exp=90, ev=18, color={0.8,0.1,0.1}, floors={5}, race="demon", atkElement="fire"},
     {name="고대용",      char="@", hp=100,atk=20,def=10,spd=0.9, exp=150,ev=8,  color={1.0,0.8,0.0}, floors={5}, race="dragon", atkElement="fire"},
@@ -604,6 +754,16 @@ local function initPlayer(keepStats)
         if startRoom then
             player.x = startRoom.cx
             player.y = startRoom.cy
+            
+            -- 동료들도 새로운 층 시작 시 플레이어 곁으로 즉시 이동
+            if party then
+                for _, comp in ipairs(party) do
+                    if comp.alive then
+                        comp.x = player.x
+                        comp.y = player.y
+                    end
+                end
+            end
         end
     else
         local race = charSelect.chosenRace or PLAYER_RACES[1]
@@ -743,6 +903,9 @@ updateCombatContext = function()
         Equipment = Equipment,
         Item = Item,
         checkLevelUp = Combat.checkLevelUp,
+        dealCompanionAttack = Combat.dealCompanionAttack,
+        lastAttackedEnemy = _G.lastAttackedEnemy,
+        getGroundItems = function() return groundItems end,
         TILE_WALL = TILE_WALL
     })
     MercenaryShop.init({
@@ -788,15 +951,52 @@ local checkLevelUp = Combat.checkLevelUp
 local dealPlayerAttack = Combat.dealPlayerAttack
 local attackEnemy = Combat.attackEnemy
 local enemyAttack = Combat.enemyAttack
+local enemySpellAttack = Combat.enemySpellAttack
 
 local function pickupItem()
     for _, gi in ipairs(groundItems) do
-        if not gi.picked and gi.x == player.x and gi.y == player.y then
-            if inv:autoPlace(gi.item) then
-                gi.picked = true
-                addMessage(gi.item.name .. " 획득! (인벤토리)")
-            else
-                addMessage("인벤토리가 꽉 찼습니다!")
+        if not gi.picked then
+            local isStepped = false
+            if gi.x == player.x and gi.y == player.y then
+                isStepped = true
+            elseif party then
+                for _, comp in ipairs(party) do
+                    if comp.alive and comp.x == gi.x and comp.y == gi.y then
+                        isStepped = true
+                        break
+                    end
+                end
+            end
+            
+            if isStepped then
+                local candidates = { {name = "플레이어", inv = playerInv} }
+                if party then
+                for _, comp in ipairs(party) do
+                    if comp.alive and comp.inv then
+                        table.insert(candidates, {name = comp.name, inv = comp.inv})
+                    end
+                end
+            end
+            
+            -- 랜덤 섞기
+            for i = #candidates, 2, -1 do
+                local j = math.random(i)
+                candidates[i], candidates[j] = candidates[j], candidates[i]
+            end
+            
+            local placed = false
+            for _, cand in ipairs(candidates) do
+                if cand.inv:autoPlace(gi.item) then
+                    gi.picked = true
+                    addMessage(gi.item.name .. " 획득! (" .. cand.name .. "의 가방)")
+                    placed = true
+                    break
+                end
+            end
+            
+            if not placed then
+                addMessage("파티 전체의 인벤토리가 꽉 찼습니다!")
+            end
             end
         end
     end
@@ -1027,7 +1227,7 @@ local function processStatusEffects()
         if torch.passive and torch.passive.type == "torch" then
             torch.passive.value = torch.passive.value - 1
             if torch.passive.value <= 0 then
-                equip:equip(nil, "torch") -- 장착 해제 및 파괴
+                equip:unequip("torch") -- 장착 해제 및 파괴
                 addMessage("횃불이 다 탔습니다! 주위가 어두워집니다.", {1, 0.5, 0.5})
             end
         end
@@ -1046,7 +1246,9 @@ local function processStatusEffects()
     -- 지형 효과 적용 (용암)
     if map[player.y] and map[player.y][player.x] == TILE_LAVA then
         local dmg = math.max(1, math.floor(getPlayerMaxHp() * 0.05))
-        player.hp = player.hp - dmg
+        if not player.godMode then
+            player.hp = player.hp - dmg
+        end
         addMessage("용암을 밟아 " .. dmg .. "의 화상 데미지를 입었습니다!", {1.0, 0.3, 0.1})
         if channeling_return > 0 then
             channeling_return = 0
@@ -1071,37 +1273,9 @@ end
 local function moveEnemies()
     for _, enemy in ipairs(enemies) do
         if enemy.alive then
-            local dist = distance(enemy.x, enemy.y, player.x, player.y)
-            if dist <= 1 then
+            local action, target = AI.process(enemy, map, MAP_WIDTH, MAP_HEIGHT, player, party, enemies)
+            if action == "ATTACK" then
                 enemyAttack(enemy)
-            elseif dist <= 8 then
-                local dx, dy = 0, 0
-                if enemy.x < player.x then dx = 1
-                elseif enemy.x > player.x then dx = -1 end
-                if enemy.y < player.y then dy = 1
-                elseif enemy.y > player.y then dy = -1 end
-
-                if math.random() > 0.5 then dy = 0 else dx = 0 end
-
-                local nx, ny = enemy.x + dx, enemy.y + dy
-                if ny >= 1 and ny <= MAP_HEIGHT and nx >= 1 and nx <= MAP_WIDTH then
-                    if map[ny][nx] ~= TILE_WALL then
-                        local blocked = false
-                        for _, other in ipairs(enemies) do
-                            if other ~= enemy and other.alive and other.x == nx and other.y == ny then
-                                blocked = true
-                                break
-                            end
-                        end
-                        if nx == player.x and ny == player.y then
-                            blocked = true
-                        end
-                        if not blocked then
-                            enemy.x = nx
-                            enemy.y = ny
-                        end
-                    end
-                end
             end
         end
     end
@@ -1424,6 +1598,7 @@ function generateProceduralTileset()
     end
 
     ENTITY_QUADS["@"] = createEntityQuad({1, 1, 0}, {0,0,0}, false, "humanoid")
+    ENTITY_QUADS["P"] = createEntityQuad({0.4, 0.8, 1.0}, {0,0,0}, false, "humanoid")
     ENTITY_QUADS["r"] = createEntityQuad({0.6, 0.4, 0.2}, {1,0,0}, false, "beast")
     ENTITY_QUADS["g"] = createEntityQuad({0.2, 0.8, 0.2}, {1,1,0}, false, "humanoid")
     ENTITY_QUADS["k"] = createEntityQuad({0.7, 0.2, 0.2}, {0,0,0}, false, "humanoid")
@@ -1605,6 +1780,31 @@ function love.update(dt)
             end
         end
     end
+
+    if gameState == "playing" and _G.GAME_SPEED > 0 and _G.heldAction then
+        local key = CONFIG.keys[_G.heldAction]
+        if key and love.keyboard.isDown(key) then
+            _G.moveTimer = _G.moveTimer - dt * _G.GAME_SPEED
+            if _G.moveTimer <= 0 then
+                _G.moveTimer = _G.moveDelay
+                if _G.heldAction == "up" then
+                    movePlayer(0, -1)
+                elseif _G.heldAction == "down" then
+                    movePlayer(0, 1)
+                elseif _G.heldAction == "left" then
+                    movePlayer(-1, 0)
+                elseif _G.heldAction == "right" then
+                    movePlayer(1, 0)
+                elseif _G.heldAction == "wait" then
+                    turn = turn + 1
+                    processStatusEffects()
+                    moveEnemies()
+                end
+            end
+        else
+            _G.heldAction = nil
+        end
+    end
 end
 
 local function isKey(action, key)
@@ -1618,6 +1818,30 @@ local OPTIONS_MENU = {"오디오: BGM", "오디오: SFX", "조작: 위", "조작
 local waitingForKey = nil
 
 function love.keypressed(key)
+    if key == "`" then
+        showConsole = not showConsole
+        return
+    end
+    if showConsole then
+        if key == "escape" then
+            showConsole = false
+            return
+        elseif key == "backspace" then
+            local byteoffset = utf8.offset(consoleInput, -1)
+            if byteoffset then
+                consoleInput = string.sub(consoleInput, 1, byteoffset - 1)
+            end
+            return
+        elseif key == "return" or key == "kpenter" then
+            if consoleInput ~= "" then
+                executeConsoleCommand(consoleInput)
+                consoleInput = ""
+            end
+            return
+        end
+        return
+    end
+
     -- 키 바인딩 대기 상태
     if waitingForKey then
         if key ~= "escape" then
@@ -1794,8 +2018,16 @@ function love.keypressed(key)
                         goldDrop = goldDrop + floor * 25
                         addMessage("★ 보스를 쓰러뜨렸습니다! 계단이 안정되었습니다.")
                     end
-                    player.gold = player.gold + goldDrop
-                    addMessage(target.name .. " 처치! (+" .. target.exp .. " 경험치, +" .. goldDrop .. " 골드)")
+                    local partyCount = 1
+                    if party then
+                        for _, comp in ipairs(party) do
+                            if comp.alive then partyCount = partyCount + 1 end
+                        end
+                    end
+                    local splitGold = math.floor(goldDrop / partyCount)
+                    
+                    player.gold = player.gold + splitGold
+                    addMessage(target.name .. " 처치! (+" .. target.exp .. " 경험치, +" .. splitGold .. " 골드)")
                     if target.isBoss then
                         local drop = rollDrop()
                         if drop then
@@ -1863,6 +2095,9 @@ function love.keypressed(key)
             elseif sel == "도감" then
                 gameState = "bestiary"
                 bestiaryScroll = 0
+            elseif sel == "용병 길드" then
+                gameState = "mercenary_shop"
+                mercenaryList = MercenaryShop.generateMercenaries()
             elseif sel == "던전 출발" then
                 startDungeon()
             elseif sel == "저장" then
@@ -1922,18 +2157,28 @@ function love.keypressed(key)
 
     if gameState ~= "playing" then return end
 
-    if isKey("up", key) then
+    if isKey("up", key) or key == "up" then
         movePlayer(0, -1)
-    elseif isKey("down", key) then
+        _G.heldAction = "up"
+        _G.moveTimer = _G.moveDelay
+    elseif isKey("down", key) or key == "down" then
         movePlayer(0, 1)
-    elseif isKey("left", key) then
+        _G.heldAction = "down"
+        _G.moveTimer = _G.moveDelay
+    elseif isKey("left", key) or key == "left" then
         movePlayer(-1, 0)
-    elseif isKey("right", key) then
+        _G.heldAction = "left"
+        _G.moveTimer = _G.moveDelay
+    elseif isKey("right", key) or key == "right" then
         movePlayer(1, 0)
-    elseif isKey("wait", key) then
+        _G.heldAction = "right"
+        _G.moveTimer = _G.moveDelay
+    elseif isKey("wait", key) or key == "space" then
         turn = turn + 1
         processStatusEffects()
         moveEnemies()
+        _G.heldAction = "wait"
+        _G.moveTimer = _G.moveDelay
     elseif key == "pageup" then
         messageScroll = math.min(messageScroll + 3, math.max(0, #messages - MAX_VISIBLE_MESSAGES))
     elseif key == "pagedown" then
@@ -1943,6 +2188,18 @@ end
 
 function love.mousepressed(x, y, button)
     if gameState == "charselect" then return end
+
+    if button == 1 then
+        local speedBtnX = 1280 - 60
+        local speedBtnY = 10
+        if x >= speedBtnX and x <= speedBtnX + 50 and y >= speedBtnY and y <= speedBtnY + 25 then
+            if _G.GAME_SPEED == 1 or _G.GAME_SPEED == 0 then _G.GAME_SPEED = 2
+            elseif _G.GAME_SPEED == 2 then _G.GAME_SPEED = 4
+            elseif _G.GAME_SPEED == 4 then _G.GAME_SPEED = 8
+            else _G.GAME_SPEED = 0 end
+            return
+        end
+    end
 
     if gameState == "secret_reward" then
         if button == 1 then
@@ -2144,9 +2401,9 @@ function love.mousepressed(x, y, button)
             local startX = sw / 2 - boxW / 2
             local startY = 120
             for i, merc in ipairs(mercenaryList) do
-                local y = startY + 20 + (i - 1) * 100
+                local boxY = startY + 20 + (i - 1) * 100
                 local btnX = startX + boxW - 140
-                local btnY = y + 20
+                local btnY = boxY + 20
                 if x >= btnX and x <= btnX + 100 and y >= btnY and y <= btnY + 40 then
                     if player.gold >= merc.cost then
                         local success, msg = Party.recruit(merc)
@@ -2267,6 +2524,60 @@ function love.mousepressed(x, y, button)
                 addMessage("대형 포션 사용! (+80 HP)")
                 item.count = item.count - 1
                 if item.count <= 0 then inv:removeItem(item) end
+                return
+            elseif item.id == "fireball_scroll" then
+                local closest = nil
+                local minDist = math.huge
+                for _, e in ipairs(enemies) do
+                    if e.alive and visibleMap[e.y] and visibleMap[e.y][e.x] then
+                        local dist = math.abs(e.x - player.x) + math.abs(e.y - player.y)
+                        if dist < minDist then
+                            minDist = dist
+                            closest = e
+                        end
+                    end
+                end
+                if not closest then
+                    addMessage("시야에 적이 없습니다!", {1.0, 0.5, 0.5})
+                    return
+                end
+                
+                addMessage("화염 폭발 스크롤을 찢었습니다!", {1.0, 0.4, 0.1})
+                Combat.dealAoeDamage(closest.x, closest.y, 3, 20, "화염 폭발")
+                item.count = item.count - 1
+                if item.count <= 0 then inv:removeItem(item) end
+                takeTurn()
+                return
+                
+            elseif item.id == "beam_scroll" then
+                local closest = nil
+                local minDist = math.huge
+                for _, e in ipairs(enemies) do
+                    if e.alive and visibleMap[e.y] and visibleMap[e.y][e.x] then
+                        local dist = math.abs(e.x - player.x) + math.abs(e.y - player.y)
+                        if dist < minDist then
+                            minDist = dist
+                            closest = e
+                        end
+                    end
+                end
+                if not closest then
+                    addMessage("시야에 적이 없습니다!", {1.0, 0.5, 0.5})
+                    return
+                end
+                
+                addMessage("섬광 관통 스크롤을 찢었습니다!", {1.0, 1.0, 0.5})
+                local dx = closest.x - player.x
+                local dy = closest.y - player.y
+                local len = math.sqrt(dx*dx + dy*dy)
+                if len == 0 then len = 1 end
+                local tx = math.floor(player.x + (dx/len) * 15)
+                local ty = math.floor(player.y + (dy/len) * 15)
+                
+                Combat.dealBeamDamage(player.x, player.y, tx, ty, 25, "섬광 관통")
+                item.count = item.count - 1
+                if item.count <= 0 then inv:removeItem(item) end
+                takeTurn()
                 return
             elseif item.id == "return_scroll" then
                 if channeling_return > 0 then
@@ -2683,10 +2994,15 @@ local function drawGame()
             if comp.alive and comp.x and comp.y then
                 local cx = (comp.x - 1) * TILE_SIZE
                 local cy = (comp.y - 1) * TILE_SIZE
-                love.graphics.setColor(0, 0, 0, 0.8)
-                love.graphics.print(comp.char, cx + 4, cy + breath + 1)
-                love.graphics.setColor(0.4, 0.8, 1)
-                love.graphics.print(comp.char, cx + 3, cy + breath)
+                
+                if ENTITY_QUADS[comp.char] and TILESET_IMAGE then
+                    love.graphics.draw(TILESET_IMAGE, ENTITY_QUADS[comp.char], cx, cy + breath)
+                else
+                    love.graphics.setColor(0, 0, 0, 0.8)
+                    love.graphics.print(comp.char, cx + 4, cy + breath + 1)
+                    love.graphics.setColor(0.4, 0.8, 1)
+                    love.graphics.print(comp.char, cx + 3, cy + breath)
+                end
             end
         end
     end
@@ -2717,11 +3033,37 @@ local function drawGame()
     local rn = player.raceName or "인간"
     local cn = player.className or "전사"
     love.graphics.print("=== " .. rn .. " " .. cn .. " ===", hudX, hudY)
+    
+    -- 속도 조절 버튼
+    local speedBtnX = 1280 - 60
+    local speedBtnY = 10
+    love.graphics.setColor(0.3, 0.3, 0.4)
+    love.graphics.rectangle("fill", speedBtnX, speedBtnY, 50, 25, 4, 4)
+    love.graphics.setColor(1, 1, 1)
+    local speedText = _G.GAME_SPEED == 0 and "x0" or "x" .. _G.GAME_SPEED
+    love.graphics.printf(speedText, speedBtnX, speedBtnY + 6, 50, "center")
+
     hudY = hudY + 22
 
     love.graphics.setColor(COLOR_WHITE)
     love.graphics.print("레벨 " .. player.level .. "  " .. floor .. "층  턴: " .. turn, hudX, hudY)
     hudY = hudY + 18
+
+    -- 계단 나침반 (다음 층으로 가는 계단 방향 안내)
+    local state = floorStates[floor]
+    if state and state.downX then
+        local dx = state.downX - player.x
+        local dy = state.downY - player.y
+        local dist = math.abs(dx) + math.abs(dy)
+        local dir = ""
+        if dy < 0 then dir = dir .. "북" elseif dy > 0 then dir = dir .. "남" end
+        if dx > 0 then dir = dir .. "동" elseif dx < 0 then dir = dir .. "서" end
+        if dir == "" then dir = "도달" end
+        
+        love.graphics.setColor(COLOR_STAIR)
+        love.graphics.print("계단: " .. dir .. "방향 (거리 " .. dist .. ")", hudX, hudY)
+        hudY = hudY + 18
+    end
 
     -- HP 바
     love.graphics.setColor(COLOR_HP_BG)
@@ -2982,7 +3324,7 @@ local function drawInventory()
     local sw = love.graphics.getWidth()
     local sh = love.graphics.getHeight()
     inv.x = 30
-    inv.y = 50
+    inv.y = 80
 
     -- 탭 그리기
     local tabW = 80
@@ -3023,25 +3365,41 @@ local function drawInventory()
     -- 장비 스탯
     equip:drawStats(equip.x - 80, equip.y + 130)
 
-    -- 플레이어 현재 스탯
+    -- 선택된 대상 스탯 계산
+    local targetEntity = activeInvIndex == 0 and player or party[activeInvIndex]
+    local tAtk = (targetEntity.baseAtk or 0) + math.floor((targetEntity.str or 10)/3) + (equip:getTotalStats().atk or 0)
+    local tDef = (targetEntity.baseDef or 0) + math.floor((targetEntity.con or 10)/5) + (equip:getTotalStats().def or 0)
+    local tEv = 5 + math.floor((targetEntity.dex or 10)/2) + (equip:getTotalStats().evasion or 0)
+    local tCrit = 5 + math.floor((targetEntity.lck or 10)/3) + (equip:getTotalStats().critChance or 0)
+
+    -- 플레이어/동료 현재 스탯
     love.graphics.setColor(COLOR_GOLD)
     love.graphics.print("=== 전투 스탯 ===", equip.x - 80, equip.y + 230)
     love.graphics.setColor(1, 0.4, 0.4)
-    love.graphics.print("공격: " .. getPlayerAtk(), equip.x - 76, equip.y + 248)
+    love.graphics.print("공격: " .. tAtk, equip.x - 76, equip.y + 248)
     love.graphics.setColor(0.4, 0.6, 1)
-    love.graphics.print("방어: " .. getPlayerDef(), equip.x - 76, equip.y + 264)
+    love.graphics.print("방어: " .. tDef, equip.x - 76, equip.y + 264)
     love.graphics.setColor(0.4, 1, 0.4)
-    love.graphics.print("회피: " .. math.floor(getPlayerEvasionFull()) .. "%", equip.x - 76, equip.y + 280)
+    love.graphics.print("회피: " .. math.floor(tEv) .. "%", equip.x - 76, equip.y + 280)
     love.graphics.setColor(1, 0.8, 0.3)
-    love.graphics.print("치명: " .. math.floor(getPlayerCritFull()) .. "%", equip.x - 76, equip.y + 296)
+    love.graphics.print("치명: " .. math.floor(tCrit) .. "%", equip.x - 76, equip.y + 296)
     love.graphics.setColor(COLOR_WHITE)
-    love.graphics.print("STR:" .. player.str .. " DEX:" .. player.dex .. " INT:" .. player.int, equip.x - 76, equip.y + 316)
-    love.graphics.print("CON:" .. player.con .. " LCK:" .. player.lck, equip.x - 76, equip.y + 332)
+    love.graphics.print("STR:" .. targetEntity.str .. " DEX:" .. targetEntity.dex .. " INT:" .. targetEntity.int, equip.x - 76, equip.y + 316)
+    love.graphics.print("CON:" .. targetEntity.con .. " LCK:" .. targetEntity.lck, equip.x - 76, equip.y + 332)
     love.graphics.setColor(0.45, 0.65, 1)
-    love.graphics.print("MP:" .. (player.mana or 0) .. "/" .. (player.maxMana or 0) .. "  회복:" .. getPlayerManaRegen(), equip.x - 76, equip.y + 348)
+    love.graphics.print("MP:" .. (targetEntity.mana or 0) .. "/" .. (targetEntity.maxMana or 0), equip.x - 76, equip.y + 348)
 
     -- 패시브 효과 표시
-    local passives = getEquipPassives()
+    local passives = {}
+    for _, slotName in ipairs({"weapon", "head", "body", "accessory"}) do
+        local item = equip.slots[slotName]
+        if item and item.stats and item.stats.passives then
+            for _, p in ipairs(item.stats.passives) do
+                table.insert(passives, p)
+            end
+        end
+    end
+    
     if #passives > 0 then
         local py = equip.y + 366
         love.graphics.setColor(0.8, 0.6, 1)
@@ -3614,7 +3972,7 @@ local function drawMercenaryShop()
         love.graphics.printf(merc.name .. " (Lv." .. merc.level .. ") - " .. merc.race.name .. " " .. merc.class.name, startX + 40, y + 10, boxW, "left")
         
         love.graphics.setColor(0.8, 0.8, 0.4)
-        love.graphics.printf("STR:" .. (merc.race.stats.str + merc.class.stats.str) .. " DEX:" .. (merc.race.stats.dex + merc.class.stats.dex) .. " INT:" .. (merc.race.stats.int + merc.class.stats.int), startX + 40, y + 35, boxW, "left")
+        love.graphics.printf("STR:" .. (merc.race.stats.str + merc.class.statBonus.str) .. " DEX:" .. (merc.race.stats.dex + merc.class.statBonus.dex) .. " INT:" .. (merc.race.stats.int + merc.class.statBonus.int), startX + 40, y + 35, boxW, "left")
         
         love.graphics.setColor(1, 0.85, 0)
         love.graphics.printf("고용 비용: " .. merc.cost .. "G", startX + 40, y + 55, boxW, "left")
@@ -3753,6 +4111,9 @@ local function drawSkillTree()
         return
     end
 
+    local hoveredTooltip = nil
+
+
     local function drawSkillTreeSection(title, data, startX, startY)
         love.graphics.setColor(COLOR_WHITE)
         love.graphics.printf(title, startX, startY, 400, "center")
@@ -3796,15 +4157,10 @@ local function drawSkillTree()
                     -- 스킬 아이디와 클릭 박스를 위해 임시 데이터 저장 (mousepressed 연동용)
                     s.uiBox = {x=sx, y=sy, w=100, h=60, unlocked=unlocked, isUnlocked=isUnlocked}
                     
-                    -- 마우스 오버 툴팁
+                    -- 마우스 오버 툴팁 저장
                     local mx, my = love.mouse.getPosition()
                     if mx >= sx and mx <= sx+100 and my >= sy and my <= sy+60 then
-                        love.graphics.setColor(0, 0, 0, 0.9)
-                        love.graphics.rectangle("fill", mx+15, my+15, 200, 60)
-                        love.graphics.setColor(COLOR_WHITE)
-                        love.graphics.printf(s.name, mx+20, my+20, 190, "left")
-                        love.graphics.setColor(0.8, 0.8, 0.8)
-                        love.graphics.printf(s.desc, mx+20, my+40, 190, "left")
+                        hoveredTooltip = {s=s, mx=mx, my=my}
                     end
                 end
             end
@@ -3813,6 +4169,18 @@ local function drawSkillTree()
 
     drawSkillTreeSection("종족 특성 (" .. player.raceName .. ")", rData, sw/2 - 450, 100)
     drawSkillTreeSection("직업 특성 (" .. player.className .. ")", cData, sw/2 + 50, 100)
+
+    -- 저장된 툴팁 그리기 (모든 버튼 위에 그려지도록 최상단 처리)
+    if hoveredTooltip then
+        local s = hoveredTooltip.s
+        local mx, my = hoveredTooltip.mx, hoveredTooltip.my
+        love.graphics.setColor(0, 0, 0, 0.9)
+        love.graphics.rectangle("fill", mx+15, my+15, 200, 60)
+        love.graphics.setColor(COLOR_WHITE)
+        love.graphics.printf(s.name, mx+20, my+20, 190, "left")
+        love.graphics.setColor(0.8, 0.8, 0.8)
+        love.graphics.printf(s.desc, mx+20, my+40, 190, "left")
+    end
 end
 
 -- ===== 옵션 메뉴 그리기 =====
@@ -3943,10 +4311,35 @@ function love.draw()
     elseif gameState == "secret_reward" then
         drawGame()
         drawSecretReward()
+    elseif gameState == "mercenary_shop" then
+        drawGame()
+        drawMercenaryShop()
     else
         drawGame()
         if gameState == "inventory" then
             drawInventory()
         end
+    end
+
+    -- ===== 개발자 콘솔 렌더링 =====
+    if showConsole then
+        local sw, sh = love.graphics.getDimensions()
+        love.graphics.setColor(0, 0, 0, 0.8)
+        love.graphics.rectangle("fill", 0, 0, sw, 300)
+        
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.print("=== Developer Console ===", 10, 10)
+        
+        -- 로그 출력
+        local logY = 40
+        for i, logMsg in ipairs(consoleLogs) do
+            love.graphics.print(logMsg, 10, logY)
+            logY = logY + 15
+        end
+        
+        -- 입력창 출력
+        love.graphics.setColor(0.3, 1, 0.3, 1)
+        love.graphics.print("> " .. consoleInput .. (math.floor(love.timer.getTime() * 2) % 2 == 0 and "_" or ""), 10, 270)
+        love.graphics.setColor(1, 1, 1, 1)
     end
 end

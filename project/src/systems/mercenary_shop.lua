@@ -23,10 +23,14 @@ function MercenaryShop.generateMercenaries()
         local rKey = raceKeys[math.random(#raceKeys)]
         local cKey = classKeys[math.random(#classKeys)]
         
+        local raceData = ctx.RacesData.PLAYER_RACES[rKey]
+        local classData = ctx.ClassesData.PLAYER_CLASSES[cKey]
+        
         -- 종족별 금지 직업 필터
-        local restrict = ctx.RacesData.RACE_RESTRICTIONS[rKey]
-        while restrict and restrict.forbiddenClasses and restrict.forbiddenClasses[cKey] do
+        local restrict = ctx.RacesData.RACE_RESTRICTIONS[raceData.id]
+        while restrict and restrict.forbiddenClasses and restrict.forbiddenClasses[classData.id] do
             cKey = classKeys[math.random(#classKeys)]
+            classData = ctx.ClassesData.PLAYER_CLASSES[cKey]
         end
 
         local mLevel = math.max(1, levelBase + math.random(-1, 1))

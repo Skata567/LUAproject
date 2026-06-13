@@ -23,17 +23,19 @@ function Party.recruit(companionData)
         level = companionData.level,
         exp = 0,
         nextExp = 20 * (1.5 ^ (companionData.level - 1)),
-        str = companionData.race.stats.str + companionData.class.stats.str,
-        dex = companionData.race.stats.dex + companionData.class.stats.dex,
-        int = companionData.race.stats.int + companionData.class.stats.int,
-        con = companionData.race.stats.con + companionData.class.stats.con,
-        lck = companionData.race.stats.lck + companionData.class.stats.lck,
+        str = companionData.race.stats.str + companionData.class.statBonus.str,
+        dex = companionData.race.stats.dex + companionData.class.statBonus.dex,
+        int = companionData.race.stats.int + companionData.class.statBonus.int,
+        con = companionData.race.stats.con + companionData.class.statBonus.con,
+        lck = companionData.race.stats.lck + companionData.class.statBonus.lck,
         baseAtk = 3 + companionData.level,
         baseDef = 0,
         skills = {},
         unlockedSkills = {},
         buffs = {},
-        alive = true
+        alive = true,
+        x = ctx.player and ctx.player.x or 1,
+        y = ctx.player and ctx.player.y or 1
     }
     
     -- 기본 체력 및 마나 연산 (combat 시스템이 묶어주거나, 자체 연산)
@@ -43,7 +45,7 @@ function Party.recruit(companionData)
     comp.mana = comp.maxMana
 
     -- 고유 인벤토리 및 장비 세팅
-    comp.inv = ctx.Inventory.new(5, 5)
+    comp.inv = ctx.Inventory.new(5, 6)
     comp.equip = ctx.Equipment.new()
 
     -- 무기 시작 장비 지급 (직업 기본 무기)
@@ -94,11 +96,23 @@ function Party.distributeExp(totalExp)
     return splitExp -- 플레이어 몫 반환
 end
 
+local AI = require("systems.ai")
+
 -- 동료 턴 행동 (AI)
 function Party.takeTurns()
     if not ctx.party then return end
+    
+    local MAP_WIDTH = ctx.map and #ctx.map[1] or 100
+    local MAP_HEIGHT = ctx.map and #ctx.map or 100
+    
     for _, comp in ipairs(ctx.party) do
-        if comp.alive and comp.hp > 0 then
+        if comp.alive then
+            -- 기존 세이브나 에러로 인해 좌표가 없을 경우 복구
+            if not comp.x or not comp.y then
+                comp.x = ctx.player and ctx.player.x or 1
+                comp.y = ctx.player and ctx.player.y or 1
+            end
+
             -- 1. 가장 가까운 적 탐색 (플레이어가 친 적을 우선)
             local target = nil
             local minDist = 9999
@@ -106,7 +120,7 @@ function Party.takeTurns()
             -- 플레이어가 마지막으로 때린 적이 주변에 있으면 최우선 타겟
             if ctx.lastAttackedEnemy and ctx.lastAttackedEnemy.alive then
                 local dist = math.abs(comp.x - ctx.lastAttackedEnemy.x) + math.abs(comp.y - ctx.lastAttackedEnemy.y)
-                if dist <= 3 then -- 너무 멀면 무시
+                if dist <= 5 then -- 5칸 이내면 최우선 타겟
                     target = ctx.lastAttackedEnemy
                     minDist = dist
                 end
@@ -127,41 +141,49 @@ function Party.takeTurns()
 
             -- 공격 행동
             if target and minDist <= 1 then
-                -- 근접 공격 로직 (Combat 시스템을 호출하거나 자체 계산)
                 if ctx.dealCompanionAttack then
                     ctx.dealCompanionAttack(comp, target)
-                else
-                    -- 임시 연산
-                    local dmg = math.max(1, comp.baseAtk - (target.def or 0))
-                    target.hp = target.hp - dmg
-                    ctx.addMessage(comp.name .. "의 공격! " .. target.name .. "에게 " .. dmg .. " 데미지!")
-                    if target.hp <= 0 then
-                        target.alive = false
-                        local splitExp = Party.distributeExp(target.exp)
-                        ctx.player.exp = ctx.player.exp + splitExp
-                        ctx.addMessage(target.name .. " 처치! (+" .. splitExp .. " 경험치)")
-                        if ctx.checkLevelUp then ctx.checkLevelUp() end
-                    end
                 end
             else
-                -- 2. 플레이어 따라가기 이동 AI
-                if comp.x and comp.y and ctx.player.x and ctx.player.y then
-                    local distToPlayer = math.abs(comp.x - ctx.player.x) + math.abs(comp.y - ctx.player.y)
-                    if distToPlayer > 1 then
-                        local dx, dy = 0, 0
-                        if comp.x < ctx.player.x then dx = 1 elseif comp.x > ctx.player.x then dx = -1 end
-                        if comp.y < ctx.player.y then dy = 1 elseif comp.y > ctx.player.y then dy = -1 end
-
-                        -- 한 축씩 이동 시도 (대각선 방지 및 장애물 회피)
-                        local nx, ny = comp.x + dx, comp.y
-                        if dx ~= 0 and ctx.map[ny] and ctx.map[ny][nx] ~= ctx.TILE_WALL and not Party.isOccupied(nx, ny) then
-                            comp.x = nx
-                            comp.y = ny
-                        else
-                            nx, ny = comp.x, comp.y + dy
-                            if dy ~= 0 and ctx.map[ny] and ctx.map[ny][nx] ~= ctx.TILE_WALL and not Party.isOccupied(nx, ny) then
-                                comp.x = nx
-                                comp.y = ny
+                -- 2. 이동 AI (타겟이 있으면 타겟으로, 아이템이 있으면 아이템으로, 없으면 플레이어 따라가기)
+                local tx, ty = ctx.player.x, ctx.player.y
+                local stopDist = 1 -- 플레이어를 따라갈 때는 1칸 거리를 둔다 (길막 방지)
+                
+                if target then
+                    tx, ty = target.x, target.y
+                    stopDist = 0 -- 적을 공격할 때는 딱 붙어야 함
+                else
+                    -- 적이 없으면 주변 아이템 탐색
+                    local targetItem = nil
+                    local minItemDist = 9999
+                    if ctx.getGroundItems then
+                        local items = ctx.getGroundItems()
+                        for _, gi in ipairs(items) do
+                            if not gi.picked then
+                                local dist = math.abs(comp.x - gi.x) + math.abs(comp.y - gi.y)
+                                if dist <= 3 and dist < minItemDist then
+                                    minItemDist = dist
+                                    targetItem = gi
+                                end
+                            end
+                        end
+                    end
+                    
+                    if targetItem then
+                        tx, ty = targetItem.x, targetItem.y
+                        stopDist = 0 -- 아이템을 먹으려면 딱 붙어야 함
+                    end
+                end
+                
+                if comp.x and comp.y and tx and ty then
+                    local distToDest = math.abs(comp.x - tx) + math.abs(comp.y - ty)
+                    if distToDest > stopDist then
+                        local ax, ay = AI.findPathAStar(comp.x, comp.y, tx, ty, ctx.map, MAP_WIDTH, MAP_HEIGHT, ctx.enemies, ctx.party)
+                        if ax and ay then
+                            -- 최종적으로 가려는 칸이 occupied 되지 않았는지 (동료가 이미 있는지) 확인
+                            if not Party.isOccupied(ax, ay) then
+                                comp.x = ax
+                                comp.y = ay
                             end
                         end
                     end

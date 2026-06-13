@@ -52,6 +52,7 @@ function Combat.getPlayerAtk()
 end
 
 function Combat.getPlayerDef()
+    if Combat.hasBuff("berserk") then return 0 end
     local bonus = ctx.equip and ctx.equip:getTotalStats().def or 0
     local conBonus = math.floor(ctx.player.con / 5)
     return ctx.player.baseDef + bonus + conBonus + getBuffStatBonus("def")
@@ -311,7 +312,7 @@ function Combat.useSkill(skillIndex, targetEnemy)
         ctx.addMessage("★ " .. s.name .. "! HP +" .. healAmt .. " 회복! (MP -" .. manaCost .. ")")
         return true
     elseif s.type == "attack" then
-        local isAoE = (s.id == "chain_spark" or s.id == "dragon_breath" or s.id == "shock_mine" or s.id == "tidal_chill" or s.id == "inferno_bolt")
+        local isAoE = (s.id == "chain_spark" or s.id == "dragon_breath" or s.id == "shock_mine" or s.id == "tidal_chill" or s.id == "inferno_bolt" or s.id == "spark_trap")
         
         if not isAoE and not targetEnemy then
             ctx.addMessage("대상이 없습니다!")
@@ -406,10 +407,105 @@ function Combat.revive()
     ctx.addMessage("부활하였습니다...", {1, 0, 0})
 end
 
+-- ===== 동료 공격 처리 =====
+function Combat.dealCompanionAttack(comp, enemy)
+    -- 명중 연산 (간소화)
+    local hitRoll = math.random(1, 100)
+    local evade = enemy.ev or 0
+    if hitRoll > 80 - evade then
+        ctx.addMessage(enemy.name .. "이(가) " .. comp.name .. "의 공격을 회피했다!")
+        return 0
+    end
+
+    -- 장착 무기 확인 및 기본 공격력
+    local wDmg = 0
+    local wType = "physical"
+    local wp = comp.equip and comp.equip:getItem("weapon")
+    if wp then
+        wDmg = wp.stats.atk or 0
+        if wp.stats.element then wType = wp.stats.element end
+    end
+    
+    local rawDmg = comp.baseAtk + math.floor(comp.str / 2) + wDmg
+    
+    -- 방어력 및 속성 연산
+    local def = enemy.def or 0
+    local finalDmg = rawDmg - def
+    if wType ~= "physical" then
+        if enemy.race == "undead" and wType == "holy" then
+            finalDmg = finalDmg * 1.5
+            ctx.addMessage("효과가 굉장했다!", {1, 1, 0})
+        end
+    end
+    
+    -- 패시브 합산 유틸리티 (동료 전용)
+    local function getCompPassive(pType)
+        local total = 0
+        if comp.equip then
+            for _, item in pairs(comp.equip.slots) do
+                if item and item.stats and item.stats.passives then
+                    for _, p in ipairs(item.stats.passives) do
+                        if p.type == pType then total = total + p.value end
+                    end
+                elseif item and item.passive and item.passive.type == pType then
+                    total = total + item.passive.value
+                end
+            end
+        end
+        return total
+    end
+
+    -- 처형 패시브
+    local execute = getCompPassive("execute")
+    if execute > 0 and not enemy.isBoss and enemy.hp > 0 then
+        if (enemy.hp / enemy.maxHp) * 100 <= execute then
+            finalDmg = enemy.hp
+            ctx.addMessage("  " .. comp.name .. " 처형 발동! 즉사!", {0.8, 0.1, 0.1})
+        end
+    end
+
+    finalDmg = math.floor(math.max(1, finalDmg))
+    enemy.hp = enemy.hp - finalDmg
+    ctx.addMessage(comp.name .. "의 공격! " .. enemy.name .. "에게 " .. finalDmg .. " 데미지!", {0.5, 0.8, 1})
+    
+    -- 화상, 독, 기절 패시브 적용
+    local burnVal = getCompPassive("burn")
+    if burnVal > 0 and math.random(1, 100) <= 35 then
+        enemy.burn = (enemy.burn or 0) + burnVal
+        ctx.addMessage("  🔥 " .. enemy.name .. " 화상! (" .. burnVal .. "턴)")
+    end
+    local poisonVal = getCompPassive("poison")
+    if poisonVal > 0 and math.random(1, 100) <= 25 then
+        enemy.poison = (enemy.poison or 0) + poisonVal
+        ctx.addMessage("  ☠ " .. enemy.name .. " 중독! (" .. poisonVal .. "턴)")
+    end
+    local stunVal = getCompPassive("stun")
+    if stunVal > 0 and math.random(1, 100) <= stunVal then
+        enemy.stunned = true
+        ctx.addMessage("  ⚡ " .. enemy.name .. " 기절!")
+    end
+    
+    -- 처치 시 경험치 분배
+    if enemy.hp <= 0 then
+        enemy.alive = false
+        ctx.addMessage(enemy.name .. " 처치!", {1, 0.5, 0})
+        
+        -- 임시로 Party 시스템을 직접 require (순환 참조 조심)
+        local Party = require("systems.party")
+        local splitExp = Party.distributeExp(enemy.exp)
+        ctx.player.exp = ctx.player.exp + splitExp
+        ctx.addMessage("+" .. splitExp .. " 경험치", {0.5, 1, 0.5})
+        if Combat.checkLevelUp then Combat.checkLevelUp() end
+    end
+    
+    return finalDmg
+end
+
 -- ===== 전투 (DCSS 스타일 공식 + 패시브 효과) =====
 
 --- 플레이어 → 적 한 번 공격 (내부 함수)
 function Combat.dealPlayerAttack(enemy)
+    _G.lastAttackedEnemy = enemy
     local accuracy = getPlayerAccuracy()
     local hitRoll = math.random(1, 100)
     local evade = enemy.ev or 0
@@ -613,8 +709,21 @@ function Combat.attackEnemy(enemy)
             goldDrop = goldDrop + ctx.floor * 25
         end
         goldDrop = math.floor(goldDrop * (1 + goldBoost / 100))
-        ctx.player.gold = ctx.player.gold + goldDrop
-        ctx.addMessage("  → " .. goldDrop .. "G 획득!")
+        
+        local partyCount = 1
+        if ctx.party then
+            for _, comp in ipairs(ctx.party) do
+                if comp.alive then partyCount = partyCount + 1 end
+            end
+        end
+        local splitGold = math.floor(goldDrop / partyCount)
+        
+        ctx.player.gold = ctx.player.gold + splitGold
+        if partyCount > 1 then
+            ctx.addMessage("  → " .. splitGold .. "G 획득! (총 " .. goldDrop .. "G 파티 분배)")
+        else
+            ctx.addMessage("  → " .. splitGold .. "G 획득!")
+        end
 
         checkLevelUp()
     end
@@ -669,7 +778,9 @@ function Combat.enemyAttack(enemy)
     end
     dmg = math.max(1, math.floor(dmg * pDefMult))
 
-    ctx.player.hp = ctx.player.hp - dmg
+    if not ctx.player.godMode then
+        ctx.player.hp = ctx.player.hp - dmg
+    end
     if ctx.interruptChanneling then
         ctx.interruptChanneling()
     end
@@ -767,5 +878,130 @@ function Combat.enemyAttack(enemy)
 end
 
 -- ===== 아이템 줍기 (인벤토리로) =====
+
+
+--- AoE (Circle) Damage Algorithm
+function Combat.dealAoeDamage(cx, cy, radius, damage, sourceName)
+    local hitCount = 0
+    -- Radius check using Pythagoras
+    for y = cy - radius, cy + radius do
+        for x = cx - radius, cx + radius do
+            local dx = x - cx
+            local dy = y - cy
+            if dx*dx + dy*dy <= radius*radius then
+                -- Check enemies
+                for _, enemy in ipairs(ctx.enemies) do
+                    if enemy.alive and enemy.x == x and enemy.y == y then
+                        enemy.hp = enemy.hp - damage
+                        ctx.addMessage(sourceName .. "의 폭발이 " .. enemy.name .. "에게 " .. damage .. "의 피해를 입혔습니다!", {1.0, 0.4, 0.2})
+                        if enemy.hp <= 0 then
+                            enemy.alive = false
+                            ctx.addMessage(enemy.name .. "이(가) 폭발에 휘말려 쓰러졌습니다!", {1.0, 0.2, 0.2})
+                            Combat.gainExp(enemy.exp)
+                        end
+                        hitCount = hitCount + 1
+                    end
+                end
+                -- Check player
+                if ctx.player.x == x and ctx.player.y == y then
+                    ctx.player.hp = ctx.player.hp - math.floor(damage * 0.5)
+                    ctx.addMessage("당신은 " .. sourceName .. "의 폭발에 휩싸여 " .. math.floor(damage * 0.5) .. "의 피해를 입었습니다!", {1.0, 0.2, 0.2})
+                    hitCount = hitCount + 1
+                end
+                -- Check companions
+                if ctx.party then
+                    for _, comp in ipairs(ctx.party.companions) do
+                        if comp.alive and comp.x == x and comp.y == y then
+                            comp.hp = comp.hp - math.floor(damage * 0.5)
+                            ctx.addMessage("동료 " .. comp.name .. "이(가) 폭발에 휘말렸습니다!", {1.0, 0.5, 0.2})
+                            if comp.hp <= 0 then comp.alive = false end
+                            hitCount = hitCount + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return hitCount
+end
+
+--- Beam (Bresenham) Damage Algorithm
+function Combat.dealBeamDamage(sx, sy, tx, ty, damage, sourceName)
+    local hitCount = 0
+    local dx = math.abs(tx - sx)
+    local dy = -math.abs(ty - sy)
+    local stepX = sx < tx and 1 or -1
+    local stepY = sy < ty and 1 or -1
+    local err = dx + dy
+    
+    local cx, cy = sx, sy
+    while true do
+        if ctx.map[cy] and ctx.map[cy][cx] == ctx.TILE_WALL then
+            break -- stops at wall
+        end
+        
+        -- Apply damage at cx, cy
+        for _, enemy in ipairs(ctx.enemies) do
+            if enemy.alive and enemy.x == cx and enemy.y == cy then
+                enemy.hp = enemy.hp - damage
+                ctx.addMessage(sourceName .. "의 광선이 " .. enemy.name .. "을(를) 관통하여 " .. damage .. "의 피해!", {0.8, 0.8, 1.0})
+                if enemy.hp <= 0 then
+                    enemy.alive = false
+                    ctx.addMessage(enemy.name .. "이(가) 광선에 타버렸습니다!", {1.0, 0.2, 0.2})
+                    Combat.gainExp(enemy.exp)
+                end
+                hitCount = hitCount + 1
+            end
+        end
+        if ctx.player.x == cx and ctx.player.y == cy then
+            ctx.player.hp = ctx.player.hp - math.floor(damage * 0.5)
+            ctx.addMessage(sourceName .. "의 광선에 맞아 " .. math.floor(damage * 0.5) .. "의 피해!", {1.0, 0.2, 0.2})
+            hitCount = hitCount + 1
+        end
+        if ctx.party then
+            for _, comp in ipairs(ctx.party.companions) do
+                if comp.alive and comp.x == cx and comp.y == cy then
+                    comp.hp = comp.hp - math.floor(damage * 0.5)
+                    ctx.addMessage("동료 " .. comp.name .. "이(가) 광선에 맞았습니다!", {1.0, 0.5, 0.2})
+                    if comp.hp <= 0 then comp.alive = false end
+                    hitCount = hitCount + 1
+                end
+            end
+        end
+        
+        if cx == tx and cy == ty then break end
+        
+        local e2 = 2 * err
+        if e2 >= dy then
+            err = err + dy
+            cx = cx + stepX
+        end
+        if e2 <= dx then
+            err = err + dx
+            cy = cy + stepY
+        end
+    end
+    return hitCount
+end
+
+function Combat.enemySpellAttack(enemy, target)
+    if not enemy.alive then return end
+    
+    -- 간단한 단일 타겟 마법 혹은 방향 빔
+    local dmg = enemy.atk + 2
+    ctx.addMessage(enemy.name .. "이(가) 마법 광선을 발사합니다!", {0.8, 0.5, 1.0})
+    
+    -- 광선 데미지 적용
+    -- target.x, target.y 쪽으로 끝까지(또는 10칸) 뻗어나가는 빔
+    local dx = target.x - enemy.x
+    local dy = target.y - enemy.y
+    local len = math.sqrt(dx*dx + dy*dy)
+    if len == 0 then len = 1 end
+    local tx = math.floor(enemy.x + (dx/len) * 10)
+    local ty = math.floor(enemy.y + (dy/len) * 10)
+    
+    Combat.dealBeamDamage(enemy.x, enemy.y, tx, ty, dmg, enemy.name)
+end
+
 
 return Combat
