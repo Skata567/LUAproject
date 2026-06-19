@@ -1,7 +1,0 @@
-{
-    "code-runner.runInTerminal": true,
-    "code-runner.cwd": "${workspaceFolder}",
-    "code-runner.executorMap": {
-        "lua": "& \"D:\\2021391007\\LUAproject\\love-11.5-win64\\love.exe\" ."
-    }
-}

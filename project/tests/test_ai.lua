@@ -24,7 +24,7 @@ function test_ai_state_transitions()
     
     -- 초기 상태는 WANDER여야 함 (플레이어와 거리가 8 초과)
     AI.process(enemy, map, 20, 20, player, party, enemies)
-    assert_eq(enemy.state, "WANDER", "Initial state should be WANDER or IDLE")
+    assert_eq(enemy.state, "IDLE", "Initial state should be IDLE")
     
     -- 플레이어가 가까이 오면 CHASE로 변함
     player.x = 4

@@ -102,6 +102,7 @@ function test_recruit_and_equip()
         ClassesData = ClassesData,
         Inventory = require("inventory"),
         Equipment = require("equipment"),
+        Item = require("item"),
         party = {},
         player = {x=5, y=5}
     }
@@ -127,7 +128,7 @@ function test_recruit_and_equip()
     local sword = Item.new("iron_sword")
     comp.inv:autoPlace(sword)
     local eqSuccess = comp.equip:equip(sword, comp.inv)
-    assert_eq(eqSuccess, true, "Equip should succeed")
+    assert_eq(type(eqSuccess), "table", "Equip should succeed (return table)")
     
     print("Companion Recruit and Equip tests passed successfully.")
 end

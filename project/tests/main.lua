@@ -1,45 +1,61 @@
 -- project/tests/main.lua
 -- 테스트 진입점 스크립트. "lovec project/tests" 명령어로 독립 실행 가능.
 
-local test_inventory = require("test_inventory")
+-- src/ 모듈을 불러올 수 있도록 경로 설정
+package.path = package.path .. ";../src/?.lua;../src/?/init.lua"
 
 function love.load()
     print("=== 시작: 테스트 슈트 실행 ===")
-    
-    local passed = 0
-    local failed = 0
-    
-    local function run(testFunc, name)
-        local status, err = pcall(testFunc)
-        if status then
-            print("[PASS] " .. name)
-            passed = passed + 1
+
+    local totalPassed = 0
+    local totalFailed = 0
+
+    -- 테스트 모듈 목록
+    local testModules = {
+        { name = "test_inventory",      mod = require("test_inventory") },
+        { name = "test_ai",             mod = require("test_ai") },
+        { name = "test_party",          mod = require("test_party") },
+        { name = "test_ai_algorithms",  mod = require("test_ai_algorithms") },
+        { name = "test_auto_repeat",    mod = require("test_auto_repeat") },
+        { name = "test_religion",       mod = require("test_religion") },
+        { name = "qa_simulation",       mod = require("qa_simulation") },
+        { name = "test_pathfinding",    mod = require("test_pathfinding") },
+        { name = "test_combat",         mod = require("test_combat") },
+        { name = "test_fov",            mod = require("test_fov") },
+    }
+
+    for _, entry in ipairs(testModules) do
+        print("")
+        print("--- [" .. entry.name .. "] ---")
+
+        if type(entry.mod) == "table" then
+            local hasTests = false
+            for k, func in pairs(entry.mod) do
+                if type(func) == "function" and (k:match("^test_") or k == "run") then
+                    hasTests = true
+                    local ok, err = pcall(func)
+                    if ok then
+                        print("[PASS] " .. k)
+                        totalPassed = totalPassed + 1
+                    else
+                        print("[FAIL] " .. k .. " - " .. tostring(err))
+                        totalFailed = totalFailed + 1
+                    end
+                end
+            end
+            if not hasTests then
+                print("[SKIP] " .. entry.name .. " (no test functions found)")
+            end
         else
-            print("[FAIL] " .. name .. " - Error: " .. tostring(err))
-            failed = failed + 1
+            print("[SKIP] " .. entry.name .. " (module did not return a table)")
         end
     end
-    
-    local test_ai = require("test_ai")
-    
-    local test_party = require("test_party")
-    
-    -- 인벤토리 테스트 실행
-    run(test_inventory.test_add_item, "test_inventory.test_add_item")
-    run(test_inventory.test_remove_item, "test_inventory.test_remove_item")
-    
-    -- AI 테스트 실행
-    run(test_ai.test_ai_state_transitions, "test_ai.test_ai_state_transitions")
-    
-    -- 파티 테스트 실행
-    run(test_party.test_companion_movement, "test_party.test_companion_movement")
-    run(test_party.test_companion_attack, "test_party.test_companion_attack")
-    run(test_party.test_recruit_and_equip, "test_party.test_recruit_and_equip")
-    
-    print("=== 완료: " .. passed .. " Passed, " .. failed .. " Failed ===")
-    
+
+    print("")
+    print("=== 완료: " .. totalPassed .. " Passed, " .. totalFailed .. " Failed (총 " .. (totalPassed + totalFailed) .. " 테스트) ===")
+
     -- 테스트 완료 후 자동 종료
-    love.event.quit()
+    love.event.quit(totalFailed > 0 and 1 or 0)
 end
 
 function love.draw()
