@@ -163,6 +163,16 @@ local function generateSpecialTerrain()
         end
     end
 end
+local function getRandomFloorInRoom(room)
+    for _ = 1, 30 do
+        local x = math.random(room.x + 1, room.x + room.w - 2)
+        local y = math.random(room.y + 1, room.y + room.h - 2)
+        if map[y] and map[y][x] ~= TILE_WALL and map[y][x] ~= TILE_LAVA and map[y][x] ~= TILE_STAIR_UP and map[y][x] ~= TILE_STAIR_DOWN then
+            return x, y
+        end
+    end
+    return room.cx, room.cy
+end
 
 local function createMap()
     map = {}
@@ -269,18 +279,6 @@ local function createMap()
     return stairUpX, stairUpY, stairDownX, stairDownY
 end
 
-local function getRandomFloorInRoom(room)
-    for _ = 1, 30 do
-        local x = math.random(room.x + 1, room.x + room.w - 2)
-        local y = math.random(room.y + 1, room.y + room.h - 2)
-        if map[y] and map[y][x] ~= TILE_WALL and map[y][x] ~= TILE_LAVA and map[y][x] ~= TILE_STAIR_UP and map[y][x] ~= TILE_STAIR_DOWN then
-            return x, y
-        end
-    end
-    return room.cx, room.cy
-end
-
-
 
 -- ===== 플레이어 초기화 =====
 
@@ -294,6 +292,7 @@ function MapGen.generate(currentFloor)
         rooms = rooms,
         colorWall = COLOR_WALL,
         colorFloor = COLOR_FLOOR,
+        biome = currentBiome,
         stairUpX = upX,
         stairUpY = upY,
         stairDownX = downX,

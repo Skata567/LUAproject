@@ -1,6 +1,9 @@
 -- Roguelike + Extraction RPG Inventory (LÖVE2D)
 -- 기존 로그라이크 던전 + 그리드 기반 인벤토리 + 장비 시스템
 
+VirtualResolution = require("systems.virtual_resolution")
+VirtualResolution.applyHooks()
+
 local Item = require("item")
 local Inventory = require("inventory")
 local Equipment = require("equipment")
@@ -96,7 +99,7 @@ local channeling_return = 0
 local map = {}
 local visibleMap = {}
 local exploredMap = {}
-local camera = {x = 0, y = 0}
+local camera = {x = 0, y = 0, scale = 1.0}
 local currentBiome = "dungeon"
 local rooms = {}
 local player = {}
@@ -143,7 +146,7 @@ local hoverItem = nil
 local shop = nil
 local stash = nil           -- 보관함 (마을 인벤토리)
 local townMenuSel = 1       -- 마을 메뉴 선택
-local TOWN_MENU = {"상점", "보관함", "도감", "용병 길드", "던전 출발", "저장"}
+local TOWN_MENU = {"상점", "보관함", "도감", "용병 길드", "던전 출발"}
 local bestiaryScroll = 0
 local activeInvIndex = 0
 local mercenaryList = {}
@@ -253,8 +256,8 @@ local function executeConsoleCommand(cmdStr)
             return
         end
         local mx, my = love.mouse.getPosition()
-        local tx = math.floor((mx + camera.x) / TILE_SIZE)
-        local ty = math.floor((my + camera.y) / TILE_SIZE)
+        local tx = math.floor((mx / camera.scale + camera.x) / TILE_SIZE)
+        local ty = math.floor((my / camera.scale + camera.y) / TILE_SIZE)
         if map[ty] and map[ty][tx] then
             local scale = 1 + (floor - 1) * 0.15
             local hpVal  = math.floor(etype.hp * scale)
@@ -395,6 +398,9 @@ local function saveFloorState()
         rooms = rooms,
         enemies = enemies,
         groundItems = groundItems,
+        colorWall = COLOR_WALL,
+        colorFloor = COLOR_FLOOR,
+        biome = currentBiome,
         upX = floorStates[floor] and floorStates[floor].upX or nil,
         upY = floorStates[floor] and floorStates[floor].upY or nil,
         downX = floorStates[floor] and floorStates[floor].downX or nil,
@@ -409,6 +415,9 @@ local function loadFloorState(targetFloor)
     rooms = state.rooms
     enemies = state.enemies
     groundItems = state.groundItems
+    COLOR_WALL = state.colorWall or COLOR_WALL
+    COLOR_FLOOR = state.colorFloor or COLOR_FLOOR
+    currentBiome = state.biome or currentBiome
     return true
 end
 
@@ -951,6 +960,7 @@ local function startDungeon()
     rooms = gen.rooms
     COLOR_WALL = gen.colorWall
     COLOR_FLOOR = gen.colorFloor
+    currentBiome = gen.biome
     
     if gen.stairUpX then
         floorStates[floor] = floorStates[floor] or {}
@@ -1006,6 +1016,7 @@ local function checkStair()
             rooms = gen.rooms
             COLOR_WALL = gen.colorWall
             COLOR_FLOOR = gen.colorFloor
+            currentBiome = gen.biome
 
             if gen.stairUpX then
                 floorStates[floor] = floorStates[floor] or {}
@@ -1170,8 +1181,8 @@ local function moveEnemies()
 end
 
 function updateCamera()
-    local screenW = 1280 - 270
-    local screenH = 720
+    local screenW = (1280 - 270) / camera.scale
+    local screenH = 720 / camera.scale
     camera.x = math.max(0, math.min((player.x * TILE_SIZE) - (screenW / 2), (MAP_WIDTH * TILE_SIZE) - screenW))
     camera.y = math.max(0, math.min((player.y * TILE_SIZE) - (screenH / 2), (MAP_HEIGHT * TILE_SIZE) - screenH))
 end
@@ -1729,8 +1740,29 @@ local OPTIONS_MENU = {"오디오: BGM", "오디오: SFX", "조작: 위", "조작
 local waitingForKey = nil
 
 function love.keypressed(key)
+    if key == "f11" or (key == "return" and love.keyboard.isDown("lalt", "ralt")) then
+        local isFullscreen = love.window.getFullscreen()
+        love.window.setFullscreen(not isFullscreen, "desktop")
+        return
+    end
     if key == "`" then
         showConsole = not showConsole
+        return
+    end
+    if key == "=" or key == "+" then
+        camera.scale = math.min(3.0, camera.scale + 0.1)
+        updateCamera()
+        return
+    elseif key == "-" then
+        camera.scale = math.max(0.5, camera.scale - 0.1)
+        updateCamera()
+        return
+    end
+    if key == "t" then
+        if _G.GAME_SPEED == 1 or _G.GAME_SPEED == 0 then _G.GAME_SPEED = 2
+        elseif _G.GAME_SPEED == 2 then _G.GAME_SPEED = 4
+        elseif _G.GAME_SPEED == 4 then _G.GAME_SPEED = 8
+        else _G.GAME_SPEED = 0 end
         return
     end
     if showConsole then
@@ -2765,10 +2797,11 @@ end
 -- ===== 그리기 =====
 local function drawGame()
     love.graphics.push()
+    love.graphics.scale(camera.scale, camera.scale)
     love.graphics.translate(-camera.x, -camera.y)
 
-    local screenW = 1280 - 270
-    local screenH = 720
+    local screenW = (1280 - 270) / camera.scale
+    local screenH = 720 / camera.scale
     
     local startCol = math.floor(camera.x / TILE_SIZE)
     local endCol = math.floor((camera.x + screenW) / TILE_SIZE) + 1
@@ -3689,7 +3722,7 @@ local function drawCharSelect()
             -- 숙련 보너스
             love.graphics.setColor(0.8, 0.6, 1)
             love.graphics.print("무기 숙련:", infoX, iy)
-            local px = infoX + 60
+            local px = infoX + 85
             local hasProf = false
             for elem, val in pairs(sel.profBonus) do
                 if val > 0 then
@@ -3806,7 +3839,7 @@ local function drawCharSelect()
             -- 무기 숙련
             love.graphics.setColor(0.8, 0.6, 1)
             love.graphics.print("무기 숙련:", infoX, iy)
-            local px = infoX + 60
+            local px = infoX + 85
             for elem, val in pairs(sel.profBonus) do
                 if val > 0 then
                     local ec = ELEMENT_COLORS[elem] or {0.8, 0.8, 0.8}
@@ -4254,3 +4287,41 @@ function love.draw()
         love.graphics.setColor(1, 1, 1, 1)
     end
 end
+
+-- ==========================================
+-- 가상 해상도(Virtual Resolution) 스케일링 래핑
+-- ==========================================
+_G.__ApplyVirtualResolutionHooks = function()
+    local orig_draw = love.draw
+    function love.draw()
+        if VirtualResolution then VirtualResolution.push() end
+        orig_draw()
+        if VirtualResolution then VirtualResolution.pop() end
+    end
+
+    local orig_mousepressed = love.mousepressed
+    function love.mousepressed(x, y, button, istouch, presses)
+        if VirtualResolution then x, y = VirtualResolution.screenToVirtual(x, y) end
+        orig_mousepressed(x, y, button, istouch, presses)
+    end
+
+    local orig_mousereleased = love.mousereleased
+    function love.mousereleased(x, y, button, istouch, presses)
+        if VirtualResolution then x, y = VirtualResolution.screenToVirtual(x, y) end
+        orig_mousereleased(x, y, button, istouch, presses)
+    end
+
+    if love.mousemoved then
+        local orig_mousemoved = love.mousemoved
+        function love.mousemoved(x, y, dx, dy, istouch)
+            local scale = 1
+            if VirtualResolution then
+                x, y = VirtualResolution.screenToVirtual(x, y)
+                scale = select(1, VirtualResolution.getTransform())
+            end
+            orig_mousemoved(x, y, dx / scale, dy / scale, istouch)
+        end
+    end
+end
+_G.__ApplyVirtualResolutionHooks()
+_G.__ApplyVirtualResolutionHooks = nil
